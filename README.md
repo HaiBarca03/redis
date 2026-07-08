@@ -11,9 +11,9 @@
 | Day | Chu De | File |
 |---|---|---|
 | Day 1 | Redis Foundation & Basic Data Types | [Day1_Redis_Foundation_Production_Guide.md](Day_1/Day1_Redis_Foundation_Production_Guide.md) |
-| Day 2 | Redis Core Features | [Day2_Redis_Core_Features_Production_Guide.md](Day_1/Day2_Redis_Core_Features_Production_Guide.md) |
-| Day 3 | Redis Patterns | [Day3_Redis_Patterns_Production_Guide.md](Day_1/Day3_Redis_Patterns_Production_Guide.md) |
-| Day 4 | Production Redis | [Day4_Redis_Production_Operations_Guide.md](Day_1/Day4_Redis_Production_Operations_Guide.md) |
+| Day 2 | Redis Core Features | [Day2_Redis_Core_Features_Production_Guide.md](Day_2/Day2_Redis_Core_Features_Production_Guide.md) |
+| Day 3 | Redis Patterns | [Day3_Redis_Patterns_Production_Guide.md](Day_3/Day3_Redis_Patterns_Production_Guide.md) |
+| Day 4 | Production Redis | [Day4_Redis_Production_Operations_Guide.md](Day_4/Day4_Redis_Production_Operations_Guide.md) |
 
 ---
 

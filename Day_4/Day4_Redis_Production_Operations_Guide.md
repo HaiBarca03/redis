@@ -1,23 +1,23 @@
 # Day 4: Production Redis — Operations Guide
 
-> **Mindset**: Day 4 la su khac biet giua "Redis chay duoc" va "Redis chay dung trong production". Mot Redis cau hinh sai co the mat data, bi exploit, hoac down het cluster luc cao diem.
+> **Mindset**: Day 4 là sự khác biệt giữa "Redis chạy được" và "Redis chạy đúng trong production". Một Redis cấu hình sai có thể mất data, bị exploit, hoặc down hết cluster lúc cao điểm.
 
 ---
 
-## Muc Tieu
+## Mục Tiêu
 
-Sau Day 4, ban phai:
+Sau Day 4, bạn phải:
 
-- [ ] Giai thich RDB vs AOF va chon dung cho tung use case
-- [ ] Config maxmemory va eviction policy phu hop
-- [ ] Mo ta replication lag va hau qua cua no
-- [ ] Giai thich Sentinel vs Cluster — khi nao dung cai nao
-- [ ] Doc va hieu output cua `INFO`, `SLOWLOG`, `LATENCY DOCTOR`
-- [ ] Tinh duoc hit ratio va biet nguong canh bao
-- [ ] Setup ACL dung voi least privilege
-- [ ] Thiet ke production Redis cho timekeeping system
+- [ ] Giải thích RDB vs AOF và chọn đúng cho từng use case
+- [ ] Config maxmemory và eviction policy phù hợp
+- [ ] Mô tả replication lag và hậu quả của nó
+- [ ] Giải thích Sentinel vs Cluster — khi nào dùng cái nào
+- [ ] Đọc và hiểu output của `INFO`, `SLOWLOG`, `LATENCY DOCTOR`
+- [ ] Tính được hit ratio và biết ngưỡng cảnh báo
+- [ ] Setup ACL đúng với least privilege
+- [ ] Thiết kế production Redis cho timekeeping system
 
-**Context Project**: Timekeeping System. 500-2000 employees. Peak load 8:00-8:30 AM. Critical data trong PostgreSQL, Redis la cache/coordination layer.
+**Context Project**: Timekeeping System. 500-2000 employees. Peak load 8:00-8:30 AM. Critical data trong PostgreSQL, Redis là cache/coordination layer.
 
 ---
 
@@ -36,7 +36,7 @@ Redis INFO sections: memory server keyspace replication
 Redis SLOWLOG GET latency-monitor-threshold
 Redis CLIENT LIST CLIENT KILL
 Redis LATENCY DOCTOR LATENCY HISTORY
-Redis ACL AUTH ACL SETUSER ACL WHOAMI
+Redis ACL AUTH ACL WHOAMI
 Redis TLS protected-mode requirepass
 Redis production checklist
 Redis managed cloud: ElastiCache Upstash Redis Cloud
@@ -48,31 +48,31 @@ Redis managed cloud: ElastiCache Upstash Redis Cloud
 
 ### 1.1 RDB (Redis Database Snapshot)
 
-RDB = Periodic fork va dump toan bo data ra file nhi phan.
+RDB = Periodic fork và dump toàn bộ data ra file nhị phân.
 
 ```
 Redis RAM → fork() → child process → serialize → /data/dump.rdb
 ```
 
-**Cau hinh:**
+**Cấu hình:**
 
 ```conf
 # redis.conf
-# Snapshot neu >= 1 key thay doi trong 3600 giay (1 gio)
+# Snapshot nếu >= 1 key thay đổi trong 3600 giây (1 giờ)
 save 3600 1
-# Snapshot neu >= 100 key thay doi trong 300 giay (5 phut)
+# Snapshot nếu >= 100 key thay đổi trong 300 giây (5 phút)
 save 300 100
-# Snapshot neu >= 10000 key thay doi trong 60 giay (1 phut)
+# Snapshot nếu >= 10000 key thay đổi trong 60 giây (1 phút)
 save 60 10000
 
-# Tat RDB
+# Tắt RDB
 save ""
 
 # File path
 dir /data
 dbfilename dump.rdb
 
-# Neu RDB fail → tu choi write (an toan hon)
+# Nếu RDB fail → từ chối write (an toàn hơn)
 stop-writes-on-bgsave-error yes
 
 # Compress RDB file (CPU vs disk trade-off)
@@ -83,33 +83,33 @@ rdbcompression yes
 
 ```bash
 BGSAVE          # Background snapshot (non-blocking)
-SAVE            # Foreground snapshot (blocking — khong dung production)
-LASTSAVE        # Unix timestamp cua lan snapshot cuoi
+SAVE            # Foreground snapshot (blocking — không dùng production)
+LASTSAVE        # Unix timestamp của lần snapshot cuối
 ```
 
-**Dac diem:**
+**Đặc điểm:**
 
-| Tieu chi | RDB |
+| Tiêu chí | RDB |
 |---|---|
-| Data mat toi da | Giua 2 lan snapshot (co the 1-60 phut) |
-| Toc do restart | Nhanh (load binary file) |
-| Kich thuoc file | Nho, compact |
-| CPU anh huong | fork() tao spike nho (co the vai tram ms) |
+| Data mất tối đa | Giữa 2 lần snapshot (có thể 1-60 phút) |
+| Tốc độ restart | Nhanh (load binary file) |
+| Kích thước file | Nhỏ, compact |
+| CPU ảnh hưởng | fork() tạo spike nhỏ (có thể vài trăm ms) |
 | Use case | Backup, disaster recovery |
 
 ---
 
 ### 1.2 AOF (Append-Only File)
 
-AOF = Ghi moi write command vao file log. Khi restart, replay lai toan bo log.
+AOF = Ghi mỗi write command vào file log. Khi restart, replay lại toàn bộ log.
 
 ```
 SET key val   →  [*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$3\r\nval\r\n] → appendonly.aof
-INCR counter  →  [ghi vao cuoi file]
-DEL key       →  [ghi vao cuoi file]
+INCR counter  →  [ghi vào cuối file]
+DEL key       →  [ghi vào cuối file]
 ```
 
-**Cau hinh:**
+**Cấu hình:**
 
 ```conf
 # redis.conf
@@ -117,16 +117,16 @@ appendonly yes
 appendfilename "appendonly.aof"
 dir /data
 
-# Fsync strategy — QUAN TRONG NHAT
-appendfsync always      # Flush moi command, fsync ngay → an toan nhat, CHAM nhat (~1000 ops/s)
-appendfsync everysec    # Flush + fsync moi giay → BALANCE tot (mat toi da 1 giay data)
-appendfsync no          # De OS quyet dinh (thuong 30s) → NHANH nhat, mat nhieu nhat
+# Fsync strategy — QUAN TRỌNG NHẤT
+appendfsync always      # Flush mỗi command, fsync ngay → an toàn nhất, CHẬM nhất (~1000 ops/s)
+appendfsync everysec    # Flush + fsync mỗi giây → BALANCE tốt (mất tối đa 1 giây data)
+appendfsync no          # Để OS quyết định (thường 30s) → NHANH nhất, mất nhiều nhất
 
-# AOF rewrite (compact lai file lon)
-auto-aof-rewrite-percentage 100    # Rewrite khi AOF lon gap doi baseline
-auto-aof-rewrite-min-size 64mb     # Chi rewrite neu file > 64MB
+# AOF rewrite (compact lại file lớn)
+auto-aof-rewrite-percentage 100    # Rewrite khi AOF lớn gấp đôi baseline
+auto-aof-rewrite-min-size 64mb     # Chỉ rewrite nếu file > 64MB
 
-# An toan khi AOF bi truncated (crash giua khi ghi)
+# An toàn khi AOF bị truncated (crash giữa khi ghi)
 aof-use-rdb-preamble yes           # Hybrid: RDB snapshot + AOF delta (Redis 4.0+)
 ```
 
@@ -136,14 +136,14 @@ aof-use-rdb-preamble yes           # Hybrid: RDB snapshot + AOF delta (Redis 4.0
 BGREWRITEAOF    # Compact AOF file (background, non-blocking)
 ```
 
-**Dac diem:**
+**Đặc điểm:**
 
-| Tieu chi | AOF everysec | AOF always | AOF no |
+| Tiêu chí | AOF everysec | AOF always | AOF no |
 |---|---|---|---|
-| Data mat toi da | 1 giay | 0 (gan nhu) | Nhieu giay |
-| Toc do ghi | Cao | Thap (~1k ops/s) | Cao nhat |
-| Kich thuoc file | Lon | Lon | Lon |
-| Restart speed | Cham (replay log) | Cham | Cham |
+| Data mất tối đa | 1 giây | 0 (gần như) | Nhiều giây |
+| Tốc độ ghi | Cao | Thấp (~1k ops/s) | Cao nhất |
+| Kích thước file | Lớn | Lớn | Lớn |
+| Restart speed | Chậm (replay log) | Chậm | Chậm |
 
 ---
 
@@ -154,34 +154,34 @@ save ""
 appendonly no
 ```
 
-Restart → mat toan bo. Dung cho **pure cache** — data lay lai tu PostgreSQL khi miss.
+Restart → mất toàn bộ. Dùng cho **pure cache** — data lấy lại từ PostgreSQL khi miss.
 
 ---
 
-### 1.4 Nen Chon Gi? (Decision Matrix)
+### 1.4 Nên Chọn Gì? (Decision Matrix)
 
-| Use Case | Persistence | Ly Do |
+| Use Case | Persistence | Lý Do |
 |---|---|---|
-| Employee profile cache | **None** | DB la source of truth, cache miss OK |
-| Attendance summary cache | **None** | Rebuild duoc tu DB |
-| Session tokens | **AOF everysec** | Mat session → user bi kick → bad UX |
-| OTP codes | **AOF everysec** | Mat OTP → user khong login duoc |
-| Distributed locks | **None / AOF everysec** | Lock ngan (10s), mat lock = TTL expire tu giai quyet |
-| Rate limit counters | **None** | Mat counter = window reset = chap nhan duoc |
-| Idempotency keys | **AOF everysec** | Mat key → duplicate write → nguy hiem |
-| Stream events | **AOF everysec** | Mat event = mat du lieu nghiep vu |
+| Employee profile cache | **None** | DB là source of truth, cache miss OK |
+| Attendance summary cache | **None** | Rebuild được từ DB |
+| Session tokens | **AOF everysec** | Mất session → user bị kick → bad UX |
+| OTP codes | **AOF everysec** | Mất OTP → user không login được |
+| Distributed locks | **None / AOF everysec** | Lock ngắn (10s), mất lock = TTL expire tự giải quyết |
+| Rate limit counters | **None** | Mất counter = window reset = chấp nhận được |
+| Idempotency keys | **AOF everysec** | Mất key → duplicate write → nguy hiểm |
+| Stream events | **AOF everysec** | Mất event = mất dữ liệu nghiệp vụ |
 
 **Timekeeping recommendation:**
 
 ```conf
-# Single Redis instance cho moi thu
+# Single Redis instance cho mọi thứ
 appendonly yes
 appendfsync everysec
-save ""          # Tat RDB, dung AOF thuan
+save ""          # Tắt RDB, dùng AOF thuần
 aof-use-rdb-preamble yes  # Hybrid mode
 ```
 
-**Hoac** dung 2 Redis instance:
+**Hoặc** dùng 2 Redis instance:
 - `redis-cache`: No persistence, allkeys-lru (pure cache)
 - `redis-state`: AOF everysec, noeviction (session/lock/stream)
 
@@ -193,7 +193,7 @@ aof-use-rdb-preamble yes  # Hybrid mode
 aof-use-rdb-preamble yes
 ```
 
-File AOF bat dau bang RDB snapshot → append AOF commands tu do tro di. Restart nhanh hon AOF thuan, du lieu day du hon RDB thuan.
+File AOF bắt đầu bằng RDB snapshot → append AOF commands từ đó trở đi. Restart nhanh hơn AOF thuần, dữ liệu đầy đủ hơn RDB thuần.
 
 ---
 
@@ -202,13 +202,13 @@ File AOF bat dau bang RDB snapshot → append AOF commands tu do tro di. Restart
 ### 2.1 maxmemory
 
 ```conf
-# Dat gioi han memory
+# Đặt giới hạn memory
 maxmemory 2gb
 maxmemory 512mb
-maxmemory 0       # Khong gioi han (nguy hiem tren server co limit)
+maxmemory 0       # Không giới hạn (nguy hiểm trên server có limit)
 ```
 
-**Uoc tinh memory can thiet:**
+**Ước tính memory cần thiết:**
 
 ```
 Timekeeping system:
@@ -218,50 +218,50 @@ Timekeeping system:
 - Leaderboard, counters, locks: ~5MB
 - Redis overhead: ~30MB
 
-Tong: ~50MB voi normal load
-→ Dat maxmemory = 256mb (buffer nhieu)
+Tổng: ~50MB với normal load
+→ Đặt maxmemory = 256mb (buffer nhiều)
 → Alert khi > 70% (180MB)
 → Check khi > 85% (218MB)
 ```
 
 ```bash
-# Kiem tra hien tai
+# Kiểm tra hiện tại
 INFO memory
 
-# Output quan trong:
-# used_memory:           50331648   (50MB dang dung)
+# Output quan trọng:
+# used_memory:           50331648   (50MB đang dùng)
 # used_memory_peak:      78643200   (78MB peak)
-# maxmemory:             268435456  (256MB gioi han)
-# mem_fragmentation_ratio: 1.2      (OK, < 1.5 la binh thuong)
+# maxmemory:             268435456  (256MB giới hạn)
+# mem_fragmentation_ratio: 1.2      (OK, < 1.5 là bình thường)
 ```
 
 **mem_fragmentation_ratio:**
-- `1.0 - 1.5`: Binh thuong
-- `> 1.5`: Memory fragmentation — Redis dang dung nhieu hon can
-- `< 1.0`: Redis dang swap ra disk — NGUY HIEM, latency tang vot
+- `1.0 - 1.5`: Bình thường
+- `> 1.5`: Memory fragmentation — Redis đang dùng nhiều hơn cần
+- `< 1.0`: Redis đang swap ra disk — NGUY HIỂM, latency tăng vọt
 
 ### 2.2 Eviction Policies
 
-Khi Redis dat `maxmemory`, no phai quyet dinh xoa key nao:
+Khi Redis đạt `maxmemory`, nó phải quyết định xóa key nào:
 
 ```conf
 maxmemory-policy allkeys-lru
 ```
 
-| Policy | Mo Ta | Dung Khi |
+| Policy | Mô Tả | Dùng Khi |
 |---|---|---|
-| `noeviction` | Tu choi write, tra loi OOM error | Khong muon mat data, se alert va xu ly thu cong |
-| `allkeys-lru` | Xoa key it su dung nhat (LRU) trong tat ca key | Pure cache, moi key co the bi xoa |
-| `allkeys-lfu` | Xoa key it truy cap nhat (LFU) trong tat ca key | Cache voi access pattern khong deu |
-| `allkeys-random` | Xoa key ngau nhien | Khong nen dung |
-| `volatile-lru` | LRU trong cac key co TTL | Mixed: co key can giu, co key co the xoa |
-| `volatile-lfu` | LFU trong cac key co TTL | Mixed voi LFU |
-| `volatile-ttl` | Xoa key co TTL ngan nhat truoc | Muon xoa key sap het han |
-| `volatile-random` | Random trong key co TTL | Hiem khi dung |
+| `noeviction` | Từ chối write, trả lời OOM error | Không muốn mất data, sẽ alert và xử lý thủ công |
+| `allkeys-lru` | Xóa key ít sử dụng nhất (LRU) trong tất cả key | Pure cache, mọi key có thể bị xóa |
+| `allkeys-lfu` | Xóa key ít truy cập nhất (LFU) trong tất cả key | Cache với access pattern không đều |
+| `allkeys-random` | Xóa key ngẫu nhiên | Không nên dùng |
+| `volatile-lru` | LRU trong các key có TTL | Mixed: có key cần giữ, có key có thể xóa |
+| `volatile-lfu` | LFU trong các key có TTL | Mixed với LFU |
+| `volatile-ttl` | Xóa key có TTL ngắn nhất trước | Muốn xóa key sắp hết hạn |
+| `volatile-random` | Random trong key có TTL | Hiếm khi dùng |
 
 **LRU vs LFU:**
-- **LRU** (Least Recently Used): Xoa key **lau nhat chua duoc truy cap**. Phu hop voi temporal access pattern.
-- **LFU** (Least Frequently Used): Xoa key **it duoc truy cap nhat**. Phu hop voi hot/cold data distribution.
+- **LRU** (Least Recently Used): Xóa key **lâu nhất chưa được truy cập**. Phù hợp với temporal access pattern.
+- **LFU** (Least Frequently Used): Xóa key **ít được truy cập nhất**. Phù hợp với hot/cold data distribution.
 
 **Timekeeping recommendation:**
 
@@ -270,10 +270,10 @@ maxmemory-policy allkeys-lru
 maxmemory-policy allkeys-lru
 
 # Redis state instance (session, lock, stream)
-maxmemory-policy noeviction   # Khong tu dong xoa, alert khi day
+maxmemory-policy noeviction   # Không tự động xóa, alert khi đầy
 ```
 
-**Luu y**: Voi `noeviction`, khi day, Redis tra loi `OOM command not allowed` cho moi write. Phai monitor va xu ly truoc khi day.
+**Lưu ý**: Với `noeviction`, khi đầy, Redis trả lời `OOM command not allowed` cho mọi write. Phải monitor và xử lý trước khi đầy.
 
 ---
 
@@ -289,28 +289,28 @@ Client ─────→ Primary ─────────→ Replica 1
 Replication: ASYNC (default)
 ```
 
-**Cau hinh Primary:**
+**Cấu hình Primary:**
 
 ```conf
-# primary khong can them config dac biet
-# Chi can replica biet dia chi primary
+# primary không cần thêm config đặc biệt
+# Chỉ cần replica biết địa chỉ primary
 bind 0.0.0.0
 protected-mode yes
 requirepass "strong-password-here"
 ```
 
-**Cau hinh Replica:**
+**Cấu hình Replica:**
 
 ```conf
 replicaof 192.168.1.10 6379
 masterauth "strong-password-here"
-replica-read-only yes    # Replica chi cho phep READ
+replica-read-only yes    # Replica chỉ cho phép READ
 ```
 
-**Kiem tra replication:**
+**Kiểm tra replication:**
 
 ```bash
-# Tren primary
+# Trên primary
 INFO replication
 # Output:
 # role:master
@@ -324,52 +324,52 @@ INFO replication
 
 ### 3.2 Replication Lag
 
-**Replication la ASYNC** — replica co the lag sau primary.
+**Replication là ASYNC** — replica có thể lag sau primary.
 
 ```
 Primary: WRITE → SET key 100         (offset: 1000)
 Replica: SYNC  ... (lag 50ms) ...    (offset: 950)
 
-If client reads from replica: co the thay gia tri cu
+If client reads from replica: có thể thấy giá trị cũ
 ```
 
-**Hau qua thuc te:**
-- Client doc tu replica: co the thay du lieu cu
-- Failover: neu primary crash, replica chua sync → mat cac write gan nhat
+**Hậu quả thực tế:**
+- Client đọc từ replica: có thể thấy dữ liệu cũ
+- Failover: nếu primary crash, replica chưa sync → mất các write gần nhất
 
-**Kiem tra lag:**
+**Kiểm tra lag:**
 
 ```bash
-# Tren primary
+# Trên primary
 INFO replication | grep lag
-# slave0:ip=...,lag=0   → Dong bo tot
-# slave0:ip=...,lag=5   → Lag 5 giay → can kiem tra
+# slave0:ip=...,lag=0   → Đồng bộ tốt
+# slave0:ip=...,lag=5   → Lag 5 giây → cần kiểm tra
 
-# Thiet lap threshold alert
+# Thiết lập threshold alert
 redis.conf: min-slaves-max-lag 10
-# Primary tu choi write neu tat ca replica lag > 10 giay
+# Primary từ chối write nếu tất cả replica lag > 10 giây
 ```
 
-**Xu ly Replication Lag trong App:**
+**Xử lý Replication Lag trong App:**
 
 ```typescript
-// Strategy 1: Luon doc tu primary (don gian, tot cho consistency)
-// Dung primary cho ca READ va WRITE
+// Strategy 1: Luôn đọc từ primary (đơn giản, tốt cho consistency)
+// Dùng primary cho cả READ và WRITE
 
 // Strategy 2: Read-your-own-writes
-// Sau write → doc tu primary (hoac doi replica sync)
-// Voi IOredis:
+// Sau write → đọc từ primary (hoặc đợi replica sync)
+// Với IOredis:
 const primaryClient = new Redis({ host: 'primary', port: 6379 });
 const replicaClient = new Redis({ host: 'replica', port: 6379 });
 
-// Chi dung replica cho data khong critical
+// Chỉ dùng replica cho data không critical
 async getAttendanceSummary(empId: number, date: string) {
   // Stale OK → read from replica
   return replicaClient.get(`cache:attendance-summary:${empId}:${date}`);
 }
 
 async getSessionData(token: string) {
-  // Session phai chinh xac → read from primary
+  // Session phải chính xác → read from primary
   return primaryClient.get(`session:${token}`);
 }
 ```
@@ -378,7 +378,7 @@ async getSessionData(token: string) {
 
 ### 3.3 Sentinel — High Availability
 
-Sentinel giai quyet: **Primary down → tu dong failover sang Replica**.
+Sentinel giải quyết: **Primary down → tự động failover sang Replica**.
 
 ```
                     ┌─────────────────────────┐
@@ -393,27 +393,27 @@ Sentinel giai quyet: **Primary down → tu dong failover sang Replica**.
                            Promote to Primary
 ```
 
-**Yeu cau toi thieu**: 3 Sentinel (de bau ra quorum majority = 2/3).
+**Yêu cầu tối thiểu**: 3 Sentinel (để bầu ra quorum majority = 2/3).
 
-**Cau hinh Sentinel:**
+**Cấu hình Sentinel:**
 
 ```conf
 # sentinel.conf
 sentinel monitor mymaster 192.168.1.10 6379 2
-# mymaster = ten (dat tuy y)
+# mymaster = tên (đặt tùy ý)
 # 192.168.1.10 6379 = primary address
-# 2 = so sentinel dong y de failover (quorum)
+# 2 = số sentinel đồng ý để failover (quorum)
 
 sentinel auth-pass mymaster "strong-password"
-sentinel down-after-milliseconds mymaster 5000     # 5s khong pong → subjectively down
+sentinel down-after-milliseconds mymaster 5000     # 5s không pong → subjectively down
 sentinel failover-timeout mymaster 60000           # Timeout failover sau 60s
-sentinel parallel-syncs mymaster 1                 # Moi luc 1 replica sync (de giam tai)
+sentinel parallel-syncs mymaster 1                 # Mỗi lúc 1 replica sync (để giảm tải)
 ```
 
-**App kết noi Sentinel:**
+**App kết nối Sentinel:**
 
 ```typescript
-// ioredis voi Sentinel
+// ioredis với Sentinel
 import Redis from 'ioredis';
 
 const redis = new Redis({
@@ -422,20 +422,20 @@ const redis = new Redis({
     { host: '192.168.1.21', port: 26379 },
     { host: '192.168.1.22', port: 26379 },
   ],
-  name: 'mymaster',        // Ten khai bao trong sentinel.conf
+  name: 'mymaster',        // Tên khai báo trong sentinel.conf
   password: 'strong-password',
   sentinelPassword: 'sentinel-password',
-  retryStrategy: (times) => Math.min(times * 50, 2000), // Retry voi backoff
+  retryStrategy: (times) => Math.min(times * 50, 2000), // Retry với backoff
 });
 
 redis.on('error', (err) => console.error('Redis error:', err));
 redis.on('reconnecting', () => console.log('Redis reconnecting...'));
 ```
 
-**Sentinel gioi han:**
-- Sentinel la **HA, khong phai sharding**
-- Van chi 1 primary cho write → vertical scale only
-- Failover mat vai giay → app phai xu ly retry
+**Sentinel giới hạn:**
+- Sentinel là **HA, không phải sharding**
+- Vẫn chỉ 1 primary cho write → vertical scale only
+- Failover mất vài giây → app phải xử lý retry
 
 ---
 
@@ -443,7 +443,7 @@ redis.on('reconnecting', () => console.log('Redis reconnecting...'));
 
 ### 4.1 Hash Slots
 
-Redis Cluster phan tan data qua **16384 hash slots**.
+Redis Cluster phân tán data qua **16384 hash slots**.
 
 ```
 HASH_SLOT = CRC16(key) % 16384
@@ -457,7 +457,7 @@ Key "employee:100" → CRC16("employee:100") % 16384 = 7638 → Node B
 Key "session:abc"  → CRC16("session:abc") % 16384  = 1234 → Node A
 ```
 
-**MOVED redirect**: Neu client goi sai node, Redis tra loi `MOVED`:
+**MOVED redirect**: Nếu client gọi sai node, Redis trả lời `MOVED`:
 
 ```
 Client → Node A: GET employee:100
@@ -465,68 +465,68 @@ Node A: -MOVED 7638 192.168.1.11:6379
 Client → Node B: GET employee:100 (redirect)
 ```
 
-Smart Redis clients (ioredis) tu xu ly MOVED redirect.
+Smart Redis clients (ioredis) tự xử lý MOVED redirect.
 
 ### 4.2 Hash Tag
 
-Neu can 2 key cung nam 1 slot (de dung multi-key command), dung **hash tag**: phan trong `{}` duoc dung de tinh hash.
+Nếu cần 2 key cùng nằm 1 slot (để dùng multi-key command), dùng **hash tag**: phần trong `{}` được dùng để tính hash.
 
 ```bash
-# Khong co hash tag: khac slot → khong the dung MGET/MULTI trong cluster
+# Không có hash tag: khác slot → không thể dùng MGET/MULTI trong cluster
 employee:100:profile   → CRC16("employee:100:profile") → slot A
 employee:100:session   → CRC16("employee:100:session") → slot B
 
-# Co hash tag: cung slot → co the dung MGET/MULTI
+# Có hash tag: cùng slot → có thể dùng MGET/MULTI
 user:{100}:profile     → CRC16("100") → slot X
-user:{100}:session     → CRC16("100") → slot X (cung slot!)
+user:{100}:session     → CRC16("100") → slot X (cùng slot!)
 
-# Thuc hanh voi timekeeping
+# Thực hành với timekeeping
 cache:{emp:100}:profile
 cache:{emp:100}:schedule
 cache:{emp:100}:attendance
 ```
 
 ```bash
-# Voi hash tag cung slot → MGET hop le trong cluster
+# Với hash tag cùng slot → MGET hợp lệ trong cluster
 MGET user:{100}:profile user:{100}:session  # OK
-MGET employee:100 session:100               # ERROR (khac slot)
+MGET employee:100 session:100               # ERROR (khác slot)
 ```
 
 ### 4.3 Multi-key Limitation trong Cluster
 
 ```bash
-# CAC LENH KHONG HOAT DONG CROSS-SLOT
-MGET key1 key2          # Chi OK neu cung slot
-MSET key1 val key2 val  # Chi OK neu cung slot
-SUNIONSTORE dest k1 k2  # Chi OK neu cung slot
+# CÁC LỆNH KHÔNG HOẠT ĐỘNG CROSS-SLOT
+MGET key1 key2          # Chỉ OK nếu cùng slot
+MSET key1 val key2 val  # Chỉ OK nếu cùng slot
+SUNIONSTORE dest k1 k2  # Chỉ OK nếu cùng slot
 MULTI
   INCR key1             # Cross-slot in MULTI → ERROR
   SET key2 val
 EXEC
 ```
 
-**Giai phap:**
+**Giải pháp:**
 
 ```typescript
-// Thay vi MGET cross-slot, dung pipeline individual GETs
+// Thay vì MGET cross-slot, dùng pipeline individual GETs
 const pipeline = redis.pipeline();
 ids.forEach(id => pipeline.get(`cache:employee:${id}`));
 const results = await pipeline.exec();
-// Pipeline hoat dong tot trong cluster (moi command routing rieng)
+// Pipeline hoạt động tốt trong cluster (mỗi command routing riêng)
 ```
 
 ### 4.4 Cluster vs Sentinel vs Standalone
 
-| Tieu chi | Standalone | Sentinel | Cluster |
+| Tiêu chí | Standalone | Sentinel | Cluster |
 |---|---|---|---|
-| HA (High Availability) | Khong | Co | Co |
-| Horizontal sharding | Khong | Khong | Co |
-| Multi-key commands | Day du | Day du | Gioi han (same slot) |
-| Complexity | Thap | Trung binh | Cao |
-| Scale-out | Khong | Khong | Co |
-| Khi dung | Dev, small prod | Prod, single shard | Prod, nhieu GB data |
+| HA (High Availability) | Không | Có | Có |
+| Horizontal sharding | Không | Không | Có |
+| Multi-key commands | Đầy đủ | Đầy đủ | Giới hạn (same slot) |
+| Complexity | Thấp | Trung bình | Cao |
+| Scale-out | Không | Không | Có |
+| Khi dùng | Dev, small prod | Prod, single shard | Prod, nhiều GB data |
 
-**Timekeeping recommendation**: **Sentinel** tren 2-3 server. Data khong lon (< 1GB), Cluster them phuc tap khong can thiet. Hoac dung **managed Redis** (ElastiCache, Upstash) de tranh operational burden.
+**Timekeeping recommendation**: **Sentinel** trên 2-3 server. Data không lớn (< 1GB), Cluster thêm phức tạp không cần thiết. Hoặc dùng **managed Redis** (ElastiCache, Upstash) để tránh operational burden.
 
 ---
 
@@ -535,43 +535,43 @@ const results = await pipeline.exec();
 ### 5.1 INFO Sections
 
 ```bash
-INFO                    # Tat ca sections
+INFO                    # Tất cả sections
 INFO server             # Version, OS, port, uptime
-INFO clients            # So ket noi, blocked clients
+INFO clients            # Số kết nối, blocked clients
 INFO memory             # Memory usage, fragmentation
 INFO persistence        # RDB/AOF status
 INFO stats              # Command count, hit/miss, eviction
 INFO replication        # Primary/replica status, lag
-INFO keyspace           # So key per DB, TTL info
+INFO keyspace           # Số key per DB, TTL info
 ```
 
-**Cac metric quan trong can theo doi:**
+**Các metric quan trọng cần theo dõi:**
 
 ```bash
 INFO memory
-# used_memory:                50331648     # Dang dung 50MB
-# used_memory_rss:            67108864     # OS thay 64MB (RSS > used = fragmentation)
+# used_memory:                50331648     # Đang dùng 50MB
+# used_memory_rss:            67108864     # OS thấy 64MB (RSS > used = fragmentation)
 # mem_fragmentation_ratio:    1.33         # OK (< 1.5)
-# mem_fragmentation_bytes:    12345678     # So byte bi fragment
+# mem_fragmentation_bytes:    12345678     # Số byte bị fragment
 
 INFO stats
-# instantaneous_ops_per_sec:  12345        # Hien tai 12k ops/s
-# total_commands_processed:   987654321    # Tong so command tu khi khoi dong
+# instantaneous_ops_per_sec:  12345        # Hiện tại 12k ops/s
+# total_commands_processed:   987654321    # Tổng số command từ khi khởi động
 # keyspace_hits:              900000       # 900k cache hits
 # keyspace_misses:            100000       # 100k cache misses
-# expired_keys:               5000         # So key da expire
-# evicted_keys:               0            # So key bi evict (CANH BAO neu > 0 lien tuc)
-# rejected_connections:       0            # So ket noi bi tu choi (CANH BAO neu > 0)
+# expired_keys:               5000         # Số key đã expire
+# evicted_keys:               0            # Số key bị evict (CẢNH BÁO nếu > 0 liên tục)
+# rejected_connections:       0            # Số kết nối bị từ chối (CẢNH BÁO nếu > 0)
 
 INFO clients
-# connected_clients:          150          # Hien tai 150 connection
-# blocked_clients:            0            # Khong co client bi block
-# maxclients:                 10000        # Gioi han ket noi
+# connected_clients:          150          # Hiện tại 150 connection
+# blocked_clients:            0            # Không có client bị block
+# maxclients:                 10000        # Giới hạn kết nối
 
 INFO replication
 # role:master
 # connected_slaves:           2
-# slave0:ip=...,lag:          0            # CANH BAO neu lag > 5s
+# slave0:ip=...,lag:          0            # CẢNH BÁO nếu lag > 5s
 ```
 
 ### 5.2 Hit Ratio
@@ -581,66 +581,66 @@ Hit Ratio = keyspace_hits / (keyspace_hits + keyspace_misses)
 ```
 
 ```bash
-# Lay tu INFO stats
+# Lấy từ INFO stats
 redis-cli info stats | grep -E "keyspace_hits|keyspace_misses"
 
-# Tinh toan
+# Tính toán
 hits = 900000
 misses = 100000
 hit_ratio = 900000 / (900000 + 100000) = 0.90 = 90%
 ```
 
-| Hit Ratio | Danh Gia | Hanh Dong |
+| Hit Ratio | Đánh Giá | Hành Động |
 |---|---|---|
-| > 90% | Tot | Binh thuong |
-| 80-90% | Trung binh | Xem lai TTL, cache strategy |
-| 70-80% | Thap | Review key naming, data type |
-| < 70% | Kem | Cache ko hieu qua, review architecture |
+| > 90% | Tốt | Bình thường |
+| 80-90% | Trung bình | Xem lại TTL, cache strategy |
+| 70-80% | Thấp | Review key naming, data type |
+| < 70% | Kém | Cache ko hiệu quả, review architecture |
 
-**Timekeeping target**: > 85% vao binh thuong, > 75% vao peak 8h sang (nhieu cache miss do check-in moi).
+**Timekeeping target**: > 85% vào bình thường, > 75% vào peak 8h sáng (nhiều cache miss do check-in mới).
 
 ### 5.3 SLOWLOG
 
 ```bash
-# Cau hinh
+# Cấu hình
 redis.conf:
-slowlog-log-slower-than 10000   # Log command cham hon 10ms (10000 microseconds)
-slowlog-max-len 128              # Giu toi da 128 entry
+slowlog-log-slower-than 10000   # Log command chậm hơn 10ms (10000 microseconds)
+slowlog-max-len 128              # Giữ tối đa 128 entry
 
 # Xem slow log
-SLOWLOG GET 10          # 10 entries gan nhat
-SLOWLOG GET             # Tat ca
-SLOWLOG LEN             # So entry hien tai
-SLOWLOG RESET           # Xoa slowlog
+SLOWLOG GET 10          # 10 entries gần nhất
+SLOWLOG GET             # Tất cả
+SLOWLOG LEN             # Số entry hiện tại
+SLOWLOG RESET           # Xóa slowlog
 
 # Format output:
 # 1) (integer) 14              ← ID
 # 2) (integer) 1720401600      ← Unix timestamp
-# 3) (integer) 15234           ← Thoi gian thuc thi (microseconds)
+# 3) (integer) 15234           ← Thời gian thực thi (microseconds)
 # 4) 1) "KEYS"                 ← Command
-#    2) "*"                    ← Arguments ← DAY CHINH LA VAN DE
+#    2) "*"                    ← Arguments ← ĐÂY CHÍNH LÀ VẤN ĐỀ
 # 5) "127.0.0.1:54321"        ← Client
 # 6) ""                        ← Client name
 ```
 
-**Phan tich SLOWLOG:**
-- `KEYS *` → Thay bang `SCAN`
-- `SMEMBERS large-set` → Dung `SSCAN`
-- `HGETALL large-hash` → Giu hash nho, dung `HMGET` field cu the
-- `ZRANGE 0 -1` tren large ZSet → Them `COUNT` limit
+**Phân tích SLOWLOG:**
+- `KEYS *` → Thay bằng `SCAN`
+- `SMEMBERS large-set` → Dùng `SSCAN`
+- `HGETALL large-hash` → Giữ hash nhỏ, dùng `HMGET` field cụ thể
+- `ZRANGE 0 -1` trên large ZSet → Thêm `COUNT` limit
 
 ### 5.4 LATENCY
 
 ```bash
-# Bat latency monitoring
+# Bật latency monitoring
 redis.conf:
-latency-monitor-threshold 100    # Log event tre hon 100ms
+latency-monitor-threshold 100    # Log event trễ hơn 100ms
 
 # Commands
-LATENCY LATEST              # Cac event tre gan nhat
-LATENCY HISTORY event-name  # Lich su cua event cu the
-LATENCY RESET               # Reset tat ca
-LATENCY DOCTOR              # Phan tich va goi y tu dong (rat huu ich)
+LATENCY LATEST              # Các event trễ gần nhất
+LATENCY HISTORY event-name  # Lịch sử của event cụ thể
+LATENCY RESET               # Reset tất cả
+LATENCY DOCTOR              # Phân tích và gợi ý tự động (rất hữu ích)
 
 # LATENCY DOCTOR output example:
 # I detected 2 latency samples:
@@ -651,11 +651,11 @@ LATENCY DOCTOR              # Phan tich va goi y tu dong (rat huu ich)
 ### 5.5 CLIENT LIST
 
 ```bash
-CLIENT LIST                     # Tat ca client dang ket noi
-CLIENT LIST TYPE normal         # Loai: normal, pubsub, slave, monitor
-CLIENT KILL ID 12345            # Ngat ket noi client cu the
-CLIENT SETNAME myapp-worker-1   # Dat ten cho connection (debug de hon)
-CLIENT GETNAME                  # Lay ten hien tai
+CLIENT LIST                     # Tất cả client đang kết nối
+CLIENT LIST TYPE normal         # Loại: normal, pubsub, slave, monitor
+CLIENT KILL ID 12345            # Ngắt kết nối client cụ thể
+CLIENT SETNAME myapp-worker-1   # Đặt tên cho connection (debug dễ hơn)
+CLIENT GETNAME                  # Lấy tên hiện tại
 
 # Client LIST output:
 # id=5 addr=127.0.0.1:54321 fd=12 name=myapp-worker cmd=brpop age=120 idle=0 ...
@@ -664,17 +664,17 @@ CLIENT GETNAME                  # Lay ten hien tai
 
 ### 5.6 Dashboard Monitoring
 
-**Metrics can alert:**
+**Metrics cần alert:**
 
-| Metric | Nguong Canh Bao | Nguong Critical | Hanh Dong |
+| Metric | Ngưỡng Cảnh Báo | Ngưỡng Critical | Hành Động |
 |---|---|---|---|
-| `used_memory` | > 70% maxmemory | > 85% maxmemory | Tang maxmemory hoac xoa key |
-| `mem_fragmentation_ratio` | > 1.5 | > 2.0 | MEMORY PURGE hoac restart |
-| `evicted_keys` | > 0 (lien tuc) | > 100/phut | Tang maxmemory hoac review TTL |
-| `rejected_connections` | > 0 | > 0 | Tang maxclients, check connection pool |
+| `used_memory` | > 70% maxmemory | > 85% maxmemory | Tăng maxmemory hoặc xóa key |
+| `mem_fragmentation_ratio` | > 1.5 | > 2.0 | MEMORY PURGE hoặc restart |
+| `evicted_keys` | > 0 (liên tục) | > 100/phút | Tăng maxmemory hoặc review TTL |
+| `rejected_connections` | > 0 | > 0 | Tăng maxclients, check connection pool |
 | `blocked_clients` | > 10 | > 50 | Xem BLPOP/BRPOP timeout |
-| `replication lag` | > 2s | > 10s | Kiem tra mang, xem BGSAVE |
-| `slowlog entries` | > 10/phut | > 50/phut | Xem SLOWLOG, tim command loi |
+| `replication lag` | > 2s | > 10s | Kiểm tra mạng, xem BGSAVE |
+| `slowlog entries` | > 10/phút | > 50/phút | Xem SLOWLOG, tìm command lỗi |
 | `hit_ratio` | < 80% | < 70% | Review cache strategy |
 | `instantaneous_ops_per_sec` | > 50k | > 100k | Review workload, scale |
 
@@ -692,78 +692,78 @@ services:
       - "9121:9121"
 ```
 
-Cac dashboard co san: `grafana.com/dashboards/11835` (Redis Sentinel) hoac `grafana.com/dashboards/763`.
+Các dashboard có sẵn: `grafana.com/dashboards/11835` (Redis Sentinel) hoặc `grafana.com/dashboards/763`.
 
 ---
 
 ## 6. Security
 
-### 6.1 Network Security — Quan Trong Nhat
+### 6.1 Network Security — Quan Trọng Nhất
 
 ```conf
-# TUYET DOI KHONG bind 0.0.0.0 neu expose ra internet
-bind 127.0.0.1 192.168.1.10    # Chi nghe tren interface noi bo
-protected-mode yes              # Tu dong bat neu khong co bind va password
+# TUYỆT ĐỐI KHÔNG bind 0.0.0.0 nếu expose ra internet
+bind 127.0.0.1 192.168.1.10    # Chỉ nghe trên interface nội bộ
+protected-mode yes              # Tự động bật nếu không có bind và password
 port 6379
 
-# Doi port mac dinh (security through obscurity, it hieu qua nhung them 1 lop)
+# Đổi port mặc định (security through obscurity, ít hiệu quả nhưng thêm 1 lớp)
 port 6380
 
-# Disable cac command nguy hiem
+# Disable các command nguy hiểm
 rename-command FLUSHALL ""      # Disable FLUSHALL
 rename-command FLUSHDB ""       # Disable FLUSHDB
 rename-command DEBUG ""         # Disable DEBUG
-rename-command CONFIG "CONFIG_SECURE_KEY_abc123"  # Doi ten CONFIG
+rename-command CONFIG "CONFIG_SECURE_KEY_abc123"  # Đổi tên CONFIG
 ```
 
 ### 6.2 Authentication
 
 ```conf
-# Legacy: requirepass (tat ca user cung password)
+# Legacy: requirepass (tất cả user cùng password)
 requirepass "VeryStr0ng-P@ssw0rd-2026!"
 
 # Modern: ACL (Redis 6+)
 aclfile /etc/redis/acl.conf
 
-# Tat default user
+# Tắt default user
 ACL SETUSER default off
 ```
 
 ### 6.3 ACL (Access Control List)
 
-ACL cho phep tao user voi quyen cu the.
+ACL cho phép tạo user với quyền cụ thể.
 
 ```bash
-# Xem user hien tai
+# Xem user hiện tại
 ACL LIST
 ACL WHOAMI
-ACL CAT         # List tat ca command categories
-ACL CAT string  # List tat ca command trong category string
+ACL CAT         # List tất cả command categories
+ACL CAT string  # List tất cả command trong category string
 
-# Tao user cho app (chi duoc dung key cache:*)
+# Tạo user cho app (chỉ được dùng key cache:*)
 ACL SETUSER app-user on >AppStr0ngP@ss ~cache:* +get +set +del +expire +exists +ttl +type
 # on         = user active
 # >password  = password
-# ~cache:*   = chi duoc truy cap key bat dau bang cache:
-# +get +set  = chi duoc dung cac command nay
+# ~cache:*   = chỉ được truy cập key bắt đầu bằng cache:
+# +get +set  = chỉ được dùng các command này
 
-# User doc toa bo (chi GET, khong write)
+# User đọc toàn bộ (chỉ GET, không write)
 ACL SETUSER readonly-user on >ReadOnlyP@ss ~* +get +mget +hget +hmget +hgetall +lrange +smembers +zrange
 
-# User full quyền cho ops team (voi gioi han key khong qua rong)
+# User full quyền cho ops team (với giới hạn key không quá rộng)
 ACL SETUSER ops-admin on >OpsP@ss ~* +@all
 
 # Save ACL ra file
 ACL SAVE
 
-# Load lai ACL tu file
+# Load lại ACL từ file
 ACL LOAD
 ```
 
 **ACL cho Timekeeping System:**
 
 ```bash
-# App service user: full CRUD tren namespace cua no
+# App service user: full CRUD trên namespace của nó
 ACL SETUSER timekeeping-app on >AppP@ss \
   ~cache:* ~session:* ~otp:* ~rate:* ~lock:* ~stats:* ~online:* ~leaderboard:* \
   ~idempotency:* ~stream:attendance-events \
@@ -776,12 +776,12 @@ ACL SETUSER timekeeping-app on >AppP@ss \
   +eval +evalsha \
   -@dangerous
 
-# Worker service user: chi stream
+# Worker service user: chỉ stream
 ACL SETUSER stream-worker on >WorkerP@ss \
   ~stream:* \
-  +xreadgroup +xack +xpending +xautoclaim +xclaim +xadd
+  +xreadgroup +xack +xpending +xautoclaim +xclaim +xadd +xdel
 
-# Monitoring user: chi read-only
+# Monitoring user: chỉ read-only
 ACL SETUSER monitoring on >MonitorP@ss ~* \
   +info +dbsize +slowlog +client|list +memory|usage \
   +get +hgetall +type +ttl +exists
@@ -796,11 +796,11 @@ port 0              # Disable non-TLS
 tls-cert-file /etc/ssl/redis/redis.crt
 tls-key-file /etc/ssl/redis/redis.key
 tls-ca-cert-file /etc/ssl/redis/ca.crt
-tls-auth-clients yes   # Yeu cau client certificate
+tls-auth-clients yes   # Yêu cầu client certificate
 ```
 
 ```typescript
-// ioredis voi TLS
+// ioredis với TLS
 const redis = new Redis({
   host: 'redis.internal',
   port: 6380,
@@ -815,16 +815,16 @@ const redis = new Redis({
 
 ### 6.5 Security Checklist
 
-- [ ] Khong expose Redis ra public internet
-- [ ] Bind tren private interface only
+- [ ] Không expose Redis ra public internet
+- [ ] Bind trên private interface only
 - [ ] `protected-mode yes`
-- [ ] Dung ACL, disable default user
-- [ ] Password manh (>20 chars)
+- [ ] Dùng ACL, disable default user
+- [ ] Password mạnh (>20 chars)
 - [ ] TLS trong cloud/multi-datacenter
 - [ ] Disable FLUSHALL, FLUSHDB (rename-command)
-- [ ] Khong log sensitive data (OTP, session token) trong app logs
-- [ ] Network firewall: chi allow app servers truy cap Redis port
-- [ ] Monitor connected_clients bat thuong (co the la intrusion)
+- [ ] Không log sensitive data (OTP, session token) trong app logs
+- [ ] Network firewall: chỉ allow app servers truy cập Redis port
+- [ ] Monitor connected_clients bất thường (có thể là intrusion)
 
 ---
 
@@ -833,83 +833,83 @@ const redis = new Redis({
 ### P1: Fork Lag trong BGSAVE / BGREWRITEAOF
 
 ```
-Redis dung fork() de BGSAVE
-fork() phai copy page table cua process hien tai
-Neu Redis dang dung 2GB → fork() mat 1-2 giay → tat ca command bi block
+Redis dùng fork() để BGSAVE
+fork() phải copy page table của process hiện tại
+Nếu Redis đang dùng 2GB → fork() mất 1-2 giây → tất cả command bị block
 ```
 
-**Giai phap:**
-- Cau hinh: `no-appendfsync-on-rewrite yes` — tranh AOF fsync trong khi rewrite
-- Dat BGSAVE vao gio it tai
-- Dung smaller Redis instances thay vi 1 instance lon
+**Giải pháp:**
+- Cấu hình: `no-appendfsync-on-rewrite yes` — tránh AOF fsync trong khi rewrite
+- Đặt BGSAVE vào giờ ít tải
+- Dùng smaller Redis instances thay vì 1 instance lớn
 
 ---
 
-### P2: Maxmemory Dat Tren Tong RAM
+### P2: Maxmemory Đặt Trên Tổng RAM
 
 ```
-Server co 4GB RAM
-maxmemory = 0 (khong gioi han) → Redis dung het → OS swap → latency vot
+Server có 4GB RAM
+maxmemory = 0 (không giới hạn) → Redis dùng hết → OS swap → latency vọt
 ```
 
-**Rule**: `maxmemory <= 50-60% total RAM` de danh cho OS va process khac.
+**Rule**: `maxmemory <= 50-60% total RAM` để dành cho OS và process khác.
 
 ---
 
 ### P3: Replication Full Resync
 
 ```
-Replica bi ngat ket noi > repl-backlog-size / toc do write
-→ Redis phai FULL RESYNC (dump lai toan bo data)
-→ Trong thoi gian do: CPU/disk/memory spike o Primary
+Replica bị ngắt kết nối > repl-backlog-size / tốc độ write
+→ Redis phải FULL RESYNC (dump lại toàn bộ data)
+→ Trong thời gian đó: CPU/disk/memory spike ở Primary
 ```
 
-**Giai phap:**
+**Giải pháp:**
 
 ```conf
-# Tang repl-backlog
-repl-backlog-size 512mb   # Mac dinh 1MB → tang len neu replica hay bi ngat
+# Tăng repl-backlog
+repl-backlog-size 512mb   # Mặc định 1MB → tăng lên nếu replica hay bị ngắt
 repl-timeout 60           # Timeout cho replication connection
 ```
 
 ---
 
-### P4: Cluster Resharding Lam Gian Doan
+### P4: Cluster Resharding Làm Gián Đoạn
 
-Khi them node vao cluster, phai resharding (di chuyen hash slot). Trong qua trinh do, mot so key khong truy cap duoc.
+Khi thêm node vào cluster, phải resharding (di chuyển hash slot). Trong quá trình đó, một số key không truy cập được.
 
-**Giai phap**: Resharding vao gio low traffic. Dung `redis-cli --cluster reshard` voi `--cluster-pipeline` de tang toc. Lam tung batch nho.
-
----
-
-### P5: Khong Monitor Slowlog
-
-`KEYS *` bi chay trong production (code cu, debug script) → block 500ms → tat ca request treo → timeout → incident.
-
-**Giai phap**: Dat alert khi SLOWLOG co entry > 10ms. Review code truoc deploy: tim KEYS, SMEMBERS, HGETALL.
+**Giải pháp**: Resharding vào giờ low traffic. Dùng `redis-cli --cluster reshard` với `--cluster-pipeline` để tăng tốc. Làm từng batch nhỏ.
 
 ---
 
-### P6: Connection Pool Qua Lon
+### P5: Không Monitor Slowlog
+
+`KEYS *` bị chạy trong production (code cũ, debug script) → block 500ms → tất cả request treo → timeout → incident.
+
+**Giải pháp**: Đặt alert khi SLOWLOG có entry > 10ms. Review code trước deploy: tìm KEYS, SMEMBERS, HGETALL.
+
+---
+
+### P6: Connection Pool Quá Lớn
 
 ```
 10 NestJS instances × 100 Redis connections = 1000 connections
-Redis mac dinh maxclients = 10000 → OK
-Nhung moi connection ton ~10KB memory → 1000 connections = 10MB overhead
+Redis mặc định maxclients = 10000 → OK
+Nhưng mỗi connection tốn ~10KB memory → 1000 connections = 10MB overhead
 ```
 
-**Giai phap**: Ioredis su dung single connection per instance (multiplexed). Khong tao nhieu Redis instances trong code. Dung connection pool dung cach.
+**Giải pháp**: Ioredis sử dụng single connection per instance (multiplexed). Không tạo nhiều Redis instances trong code. Dùng connection pool đúng cách.
 
 ```typescript
-// BAD: Tao moi Redis instance moi request
+// BAD: Tạo mới Redis instance mỗi request
 async getEmployee(id: number) {
-  const redis = new Redis({ host: '...', port: 6379 }); // Moi lan tao moi!
+  const redis = new Redis({ host: '...', port: 6379 }); // Mỗi lần tạo mới!
   const result = await redis.get(`cache:employee:${id}`);
   await redis.quit();
   return result;
 }
 
-// GOOD: Dung singleton
+// GOOD: Dùng singleton
 @Module({
   providers: [{
     provide: 'REDIS_CLIENT',
@@ -920,45 +920,45 @@ async getEmployee(id: number) {
 
 ---
 
-### P7: Khong Dat TTL cho Cache Key
+### P7: Không Đặt TTL cho Cache Key
 
-Memory tang theo thoi gian → eviction bat dau xoa key → cache hit ratio giam dot ngot → DB bi hit nang.
+Memory tăng theo thời gian → eviction bắt đầu xóa key → cache hit ratio giảm đột ngột → DB bị hit nặng.
 
 ```bash
-# Kiem tra key khong co TTL
+# Kiểm tra key không có TTL
 SCAN 0 COUNT 100
-# Voi moi key: TTL key → neu -1 thi khong co TTL
+# Với mỗi key: TTL key → nếu -1 thì không có TTL
 
-# Kiem tra nhanh
+# Kiểm tra nhanh
 redis-cli --scan --pattern "cache:*" | xargs -L 1 redis-cli TTL | grep -c "^-1"
-# Dem so cache key khong co TTL
+# Đếm số cache key không có TTL
 ```
 
 ---
 
-## 8. Bai Tap Day 4: Thiet Ke Production Redis cho Timekeeping
+## 8. Bài Tập Day 4: Thiết Kế Production Redis cho Timekeeping
 
 ### 8.1 Use Cases & Key Types
 
 | Use Case | Keys | Type | TTL | Persistence Needed? |
 |---|---|---|---|---|
-| Employee profile cache | `cache:employee:{id}` | String (JSON) | 10 phut | Khong |
-| Shift config cache | `cache:shift:{id}` | String (JSON) | 60 phut | Khong |
-| Attendance summary cache | `cache:attendance:{id}:{date}` | String (JSON) | 2 phut | Khong |
-| Session token | `session:{token}` | String | 8 gio | Co (AOF) |
-| OTP code | `otp:{phone}` | String | 3 phut | Co (AOF) |
-| OTP attempt | `otp:attempt:{phone}` | String (counter) | 15 phut | Khong |
-| Login rate limit | `rate:login:{id}` | String (counter) | 15 phut | Khong |
-| Check-in rate limit | `rate:checkin:{id}` | String (counter) | 1 phut | Khong |
-| Distributed lock | `lock:{resource}` | String | 10 giay | Khong |
-| Idempotency key | `idempotency:{path}:{key}` | String | 24 gio | Co (AOF) |
-| Daily attendance bitmap | `attendance:{date}` | Bitmap | 25 gio | Khong |
-| Online employees | `online:employees` | Set | No TTL | Khong |
-| Check-in leaderboard | `leaderboard:early-checkin:{date}` | ZSet | 25 gio | Khong |
-| Daily check-in counter | `stats:checkin:{date}` | String | 25 gio | Khong |
-| Attendance stream | `stream:attendance-events` | Stream | MAXLEN ~50k | Co (AOF) |
+| Employee profile cache | `cache:employee:{id}` | String (JSON) | 10 phút | Không |
+| Shift config cache | `cache:shift:{id}` | String (JSON) | 60 phút | Không |
+| Attendance summary cache | `cache:attendance:{id}:{date}` | String (JSON) | 2 phút | Không |
+| Session token | `session:{token}` | String | 8 giờ | Có (AOF) |
+| OTP code | `otp:{phone}` | String | 3 phút | Có (AOF) |
+| OTP attempt | `otp:attempt:{phone}` | String (counter) | 15 phút | Không |
+| Login rate limit | `rate:login:{id}` | String (counter) | 15 phút | Không |
+| Check-in rate limit | `rate:checkin:{id}` | String (counter) | 1 phút | Không |
+| Distributed lock | `lock:{resource}` | String | 10 giây | Không |
+| Idempotency key | `idempotency:{path}:{key}` | String | 24 giờ | Có (AOF) |
+| Daily attendance bitmap | `attendance:{date}` | Bitmap | 25 giờ | Không |
+| Online employees | `online:employees` | Set | No TTL | Không |
+| Check-in leaderboard | `leaderboard:early-checkin:{date}` | ZSet | 25 giờ | Không |
+| Daily check-in counter | `stats:checkin:{date}` | String | 25 giờ | Không |
+| Attendance stream | `stream:attendance-events` | Stream | MAXLEN ~50k | Có (AOF) |
 
-### 8.2 Kien Truc De Xuat
+### 8.2 Kiến Trúc Đề Xuất
 
 ```
                     ┌─────────────────────────┐
@@ -975,7 +975,7 @@ Server spec per node: 2 vCPU, 4GB RAM, SSD
 Redis maxmemory: 2GB (50% of RAM)
 ```
 
-### 8.3 Cau Hinh De Xuat
+### 8.3 Cấu Hình Đề Xuất
 
 ```conf
 # redis.conf cho Primary
@@ -1019,31 +1019,31 @@ min-replicas-max-lag 10
 
 - **maxmemory**: `2GB`
 - **eviction policy**: `volatile-lru`
-  - Cache keys: co TTL → co the bi evict
-  - Session/stream/idempotency: co TTL dai → it bi evict hon
-  - Lock keys: TTL 10s → bi evict OK (TTL tu giai quyet)
+  - Cache keys: có TTL → có thể bị evict
+  - Session/stream/idempotency: có TTL dài → ít bị evict hơn
+  - Lock keys: TTL 10s → bị evict OK (TTL tự giải quyết)
   
 **Alert khi**: `used_memory > 1.4GB` (70% of 2GB).
 
 ### 8.5 Failure Scenario & Recovery
 
 ```
-Scenario: Primary Redis down luc 8h sang
+Scenario: Primary Redis down lúc 8h sáng
 
 T=0s:   Primary crash
 T=5s:   Sentinel detect (down-after-milliseconds 5000)
-T=10s:  Sentinel bau quorum, chon Replica 1 lam Primary moi
-T=15s:  Replica 1 duoc promote
-T=20s:  App (IOredis) tu dong reconnect den Primary moi qua Sentinel
+T=10s:  Sentinel bầu quorum, chọn Replica 1 làm Primary mới
+T=15s:  Replica 1 được promote
+T=20s:  App (IOredis) tự động reconnect đến Primary mới qua Sentinel
 
-Mat mat du lieu: Cac write trong 5-20 giay truoc crash (chua sync sang replica)
+Mất mát dữ liệu: Các write trong 5-20 giây trước crash (chưa sync sang replica)
 App behavior:
-  - Session: User co the phai login lai
-  - Lock: Tu expire → check-in duplicate duoc bao ve boi DB UNIQUE constraint
-  - Idempotency: Mot so idempotency key bi mat → client retry → DB constraint bat
-  - Cache: Cache miss → query DB → hot path van hoat dong
+  - Session: User có thể phải login lại
+  - Lock: Tự expire → check-in duplicate được bảo vệ bởi DB UNIQUE constraint
+  - Idempotency: Một số idempotency key bị mất → client retry → DB constraint bắt
+  - Cache: Cache miss → query DB → hot path vẫn hoạt động
   
-Recovery: Tu dong qua Sentinel, khong can manual intervention
+Recovery: Tự động qua Sentinel, không cần manual intervention
 ```
 
 ### 8.6 Metrics Alert Configuration
@@ -1110,102 +1110,102 @@ ACL SETUSER default off
 
 ## 9. Checklist Day 4
 
-### Kien thuc
+### Kiến thức
 
-- [ ] Giai thich RDB va AOF, uu/nhuoc diem moi loai
-- [ ] Chon persistence mode phu hop cho tung use case
-- [ ] Giai thich maxmemory va cach tinh maxmemory phu hop
-- [ ] Noi duoc su khac biet 4 eviction policy quan trong
-- [ ] Mo ta replication lag va hau qua khi Primary crash
-- [ ] Giai thich Sentinel la gi va tai sao can 3 node
-- [ ] Giai thich hash slot va hash tag trong Cluster
-- [ ] Doc duoc output `INFO memory`, `INFO stats`, `INFO replication`
-- [ ] Tinh duoc hit ratio va biet nguong target
-- [ ] Giai thich ACL va tai sao can least privilege
+- [ ] Giải thích RDB và AOF, ưu/nhược điểm mỗi loại
+- [ ] Chọn persistence mode phù hợp cho từng use case
+- [ ] Giải thích maxmemory và cách tính maxmemory phù hợp
+- [ ] Nói được sự khác biệt 4 eviction policy quan trọng
+- [ ] Mô tả replication lag và hậu quả khi Primary crash
+- [ ] Giải thích Sentinel là gì và tại sao cần 3 node
+- [ ] Giải thích hash slot và hash tag trong Cluster
+- [ ] Đọc được output `INFO memory`, `INFO stats`, `INFO replication`
+- [ ] Tính được hit ratio và biết ngưỡng target
+- [ ] Giải thích ACL và tại sao cần least privilege
 
-### Thuc hanh
+### Thực hành
 
-- [ ] Chay Redis voi persistence (AOF everysec)
-- [ ] Cau hinh maxmemory va test eviction
-- [ ] Setup replication (1 primary + 1 replica) bang Docker
-- [ ] Chay SLOWLOG va phan tich ket qua
-- [ ] Chay LATENCY DOCTOR
-- [ ] Tao ACL user voi quyen gioi han
-- [ ] Test AUTH voi ACL user
-- [ ] Doc INFO va tim cac metric quan trong
+- [ ] Chạy Redis với persistence (AOF everysec)
+- [ ] Cấu hình maxmemory và test eviction
+- [ ] Setup replication (1 primary + 1 replica) bằng Docker
+- [ ] Chạy SLOWLOG và phân tích kết quả
+- [ ] Chạy LATENCY DOCTOR
+- [ ] Tạo ACL user với quyền giới hạn
+- [ ] Test AUTH với ACL user
+- [ ] Đọc INFO và tìm các metric quan trọng
 
 ---
 
 ## 10. Senior Review Questions Day 4
 
-**Q1**: Tai sao can ca RDB lan AOF? Khong dung 1 cai duoc khong?
+**Q1**: Tại sao cần cả RDB lẫn AOF? Không dùng 1 cái được không?
 
-> **Answer**: AOF everysec dam bao mat toi da 1s data, nhung file lon va restart cham (replay toan bo log). RDB restart nhanh nhung mat nhieu data giua 2 snapshot. Redis 4.0+ hybrid mode (aof-use-rdb-preamble yes) giai quyet: AOF file bat dau bang RDB snapshot, roi append AOF commands → restart nhanh (load RDB phan dau) + it mat data (AOF phan sau). Production nen dung hybrid.
+> **Answer**: AOF everysec đảm bảo mất tối đa 1s data, nhưng file lớn và restart chậm (replay toàn bộ log). RDB restart nhanh nhưng mất nhiều data giữa 2 snapshot. Redis 4.0+ hybrid mode (aof-use-rdb-preamble yes) giải quyết: AOF file bắt đầu bằng RDB snapshot, rồi append AOF commands → restart nhanh (load RDB phần đầu) + ít mất data (AOF phần sau). Production nên dùng hybrid.
 
-**Q2**: volatile-lru vs allkeys-lru — chon cai nao cho timekeeping?
+**Q2**: volatile-lru vs allkeys-lru — chọn cái nào cho timekeeping?
 
-> **Answer**: `volatile-lru` phu hop hon cho timekeeping vi: Cache keys co TTL → co the bi evict. Session, lock, idempotency keys cung co TTL nhung dai hon → it bi evict hon cache. `allkeys-lru` risk evict session/lock la nhung key quan trong hon. Tuy nhien, neu dung 2 Redis instance (cache va state), dung `allkeys-lru` cho cache instance va `noeviction` cho state instance la toi uu nhat.
+> **Answer**: `volatile-lru` phù hợp hơn cho timekeeping vì: Cache keys có TTL → có thể bị evict. Session, lock, idempotency keys cũng có TTL nhưng dài hơn → ít bị evict hơn cache. `allkeys-lru` risk evict session/lock là những key quan trọng hơn. Tuy nhiên, nếu dùng 2 Redis instance (cache và state), dùng `allkeys-lru` cho cache instance và `noeviction` cho state instance là tối ưu nhất.
 
-**Q3**: Sentinel dung cho HA nhung Cluster cung co HA. Khi nao chon Sentinel, khi nao chon Cluster?
+**Q3**: Sentinel dùng cho HA nhưng Cluster cũng có HA. Khi nào chọn Sentinel, khi nào chọn Cluster?
 
-> **Answer**: Sentinel: HA cho single shard, vertical scale, multi-key operations day du, don gian hon. Dung khi data < 10GB va 1 primary du. Cluster: Horizontal sharding, scale out multiple primaries, nhung gioi han multi-key operations (phai cung slot/hash tag), phuc tap hon. Dung khi can > 10GB data, write throughput > 100k ops/s, hoac can scale out. Timekeeping system voi < 100MB data → Sentinel la du.
+> **Answer**: Sentinel: HA cho single shard, vertical scale, multi-key operations đầy đủ, đơn giản hơn. Dùng khi data < 10GB và 1 primary đủ. Cluster: Horizontal sharding, scale out multiple primaries, nhưng giới hạn multi-key operations (phải cùng slot/hash tag), phức tạp hơn. Dùng khi cần > 10GB data, write throughput > 100k ops/s, hoặc cần scale out. Timekeeping system với < 100MB data → Sentinel là đủ.
 
-**Q4**: mem_fragmentation_ratio = 2.5. Dieu gi xay ra va phai lam gi?
+**Q4**: mem_fragmentation_ratio = 2.5. Điều gì xảy ra và phải làm gì?
 
-> **Answer**: Fragmentation 2.5 co nghia Redis dang yeu cau OS cap phat 2.5x so voi thuc su dung. Nguyen nhan: Nhieu key bi delete/expire → fragmented memory blocks. Xu ly: `MEMORY PURGE` (Redis 4.0+) de de-fragment. Hoac restart Redis (trigger RDB load lai → clean memory). Monitor: Neu sau MEMORY PURGE van cao → co the do pattern su dung (nhieu key nho, thay doi lien tuc). Xem xet key design.
+> **Answer**: Fragmentation 2.5 có nghĩa Redis đang yêu cầu OS cấp phát 2.5x so với thực sự dùng. Nguyên nhân: Nhiều key bị delete/expire → fragmented memory blocks. Xử lý: `MEMORY PURGE` (Redis 4.0+) để de-fragment. Hoặc restart Redis (trigger RDB load lại → clean memory). Monitor: Nếu sau MEMORY PURGE vẫn cao → có thể do pattern sử dụng (nhiều key nhỏ, thay đổi liên tục). Xem xét key design.
 
-**Q5**: App dang dung connection pool size = 50 per instance, 10 instances. Redis maxclients = 10000. Co van de khong?
+**Q5**: App đang dùng connection pool size = 50 per instance, 10 instances. Redis maxclients = 10000. Có vấn đề không?
 
-> **Answer**: 50 × 10 = 500 connections. maxclients = 10000 → OK ve so luong. Nhung ioredis (va hau het Redis clients hien dai) dung 1 connection per instance va multiplex tat ca request qua do. Neu dang tao 50 connections per instance, co the la code dang tao nhieu Redis instances (anti-pattern). Kiem tra lai: moi module/service nen inject 1 singleton Redis client, khong tao moi. 500 connections × 10KB overhead = 5MB — chap nhan duoc nhung van nen optimize.
+> **Answer**: 50 × 10 = 500 connections. maxclients = 10000 → OK về số lượng. Nhưng ioredis (và hầu hết Redis clients hiện đại) dùng 1 connection per instance và multiplex tất cả request qua đó. Nếu đang tạo 50 connections per instance, có thể là code đang tạo nhiều Redis instances (anti-pattern). Kiểm tra lại: mỗi module/service nên inject 1 singleton Redis client, không tạo mới. 500 connections × 10KB overhead = 5MB — chấp nhận được nhưng vẫn nên optimize.
 
-**Q6**: Failover xay ra, app mat 15 giay. Trong 15 giay do, nhung gi bi anh huong trong timekeeping?
+**Q6**: Failover xảy ra, app mất 15 giây. Trong 15 giây đó, những gì bị ảnh hưởng trong timekeeping?
 
-> **Answer**: (1) Check-in: Lock expire → check-in bi duplicate → DB UNIQUE constraint bat → insert bi fail → checkin API tra loi error thay vi 200 → UX xau nhung data OK. (2) Session: User dang request co the gap error → retry tu dong hoac phai login lai. (3) Cache: Miss → fallback toi DB → DB tai tang tam thoi → cần DB co du capacity. (4) Rate limit: Counter bi mat → window reset → user co the gui nhieu request hon trong 15 giay do. (5) Stream: XADD fail → attendance event bi mat → worker khong nhan duoc → can monitor va alert. Tong ket: Failover 15 giay la chap nhan duoc voi design dung (DB constraint + retry + fallback). Quan trong la app code phai xu ly Redis connection error gracefully, khong crash.
+> **Answer**: (1) Check-in: Lock expire → check-in bị duplicate → DB UNIQUE constraint bắt → insert bị fail → checkin API trả lời error thay vì 200 → UX xấu nhưng data OK. (2) Session: User đang request có thể gặp error → retry tự động hoặc phải login lại. (3) Cache: Miss → fallback tới DB → DB tải tăng tạm thời → cần DB có đủ capacity. (4) Rate limit: Counter bị mất → window reset → user có thể gửi nhiều request hơn trong 15 giây đó. (5) Stream: XADD fail → attendance event bị mất → worker không nhận được → cần monitor và alert. Tổng kết: Failover 15 giây là chấp nhận được với design đúng (DB constraint + retry + fallback). Quan trọng là app code phải xử lý Redis connection error gracefully, không crash.
 
 ---
 
 ## Appendix: Production Redis Checklist
 
-### Truoc Khi Deploy
+### Trước Khi Deploy
 
-- [ ] `maxmemory` dat phu hop (< 60% RAM)
-- [ ] `maxmemory-policy` da chon dung
+- [ ] `maxmemory` đặt phù hợp (< 60% RAM)
+- [ ] `maxmemory-policy` đã chọn đúng
 - [ ] `protected-mode yes`
-- [ ] `bind` chi tren private interface
-- [ ] ACL da cau hinh, default user disabled
-- [ ] `FLUSHALL` / `FLUSHDB` da rename hoac disable
-- [ ] Persistence phu hop cho use case
-- [ ] `slowlog-log-slower-than` da bat
-- [ ] `latency-monitor-threshold` da bat
+- [ ] `bind` chỉ trên private interface
+- [ ] ACL đã cấu hình, default user disabled
+- [ ] `FLUSHALL` / `FLUSHDB` đã rename hoặc disable
+- [ ] Persistence phù hợp cho use case
+- [ ] `slowlog-log-slower-than` đã bật
+- [ ] `latency-monitor-threshold` đã bật
 
 ### Monitoring
 
-- [ ] Prometheus Redis Exporter da chay
-- [ ] Alert tren memory (70%, 85%)
-- [ ] Alert tren eviction
-- [ ] Alert tren replication lag
-- [ ] Alert tren hit ratio (< 80%)
-- [ ] Alert tren rejected_connections
-- [ ] SLOWLOG review hang tuan
+- [ ] Prometheus Redis Exporter đã chạy
+- [ ] Alert trên memory (70%, 85%)
+- [ ] Alert trên eviction
+- [ ] Alert trên replication lag
+- [ ] Alert trên hit ratio (< 80%)
+- [ ] Alert trên rejected_connections
+- [ ] SLOWLOG review hàng tuần
 
-### Ha Tang
+### Hạ Tầng
 
-- [ ] Redis khong tren cung server voi DB
+- [ ] Redis không trên cùng server với DB
 - [ ] Network latency Redis < 1ms
 - [ ] SSD cho persistence
-- [ ] Sentinel hoac Cluster cho production
-- [ ] Backup RDB dinh ky (du co AOF)
+- [ ] Sentinel hoặc Cluster cho production
+- [ ] Backup RDB định kỳ (dù có AOF)
 - [ ] Runbook cho failover
 
 ### Application
 
-- [ ] Redis client dung singleton pattern
+- [ ] Redis client dùng singleton pattern
 - [ ] Retry logic cho Redis error
 - [ ] Fallback khi Redis down (graceful degradation)
-- [ ] Khong luu sensitive data khong ma hoa
-- [ ] TTL co tren moi cache key
+- [ ] Không lưu sensitive data không mã hóa
+- [ ] TTL có trên mỗi cache key
 
 ---
 
-*Day 4 hoan thanh. Redis Production series ket thuc.*
-*Next: Ap dung vao Timekeeping System — implement tung layer.*
+*Day 4 hoàn thành. Redis Production series kết thúc.*
+*Next: Áp dụng vào Timekeeping System — implement từng layer.*

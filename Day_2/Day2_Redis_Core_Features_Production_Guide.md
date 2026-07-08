@@ -1,22 +1,22 @@
 # Day 2: Redis Core Features — Production Guide
 
-> **Mindset**: Day 2 la khi ban hieu Redis khong chi la key-value store. Cac tinh nang nay la diem phan biet giua nguoi biet Redis co ban va nguoi hieu Redis that su.
+> **Mindset**: Day 2 là khi bạn hiểu Redis không chỉ là key-value store. Các tính năng này là điểm phân biệt giữa người biết Redis cơ bản và người hiểu Redis thật sự.
 
 ---
 
-## Muc Tieu
+## Mục Tiêu
 
-Sau Day 2, ban phai tra loi duoc **khong can suy nghi**:
+Sau Day 2, bạn phải trả lời được **không cần suy nghĩ**:
 
-- [ ] Bitmap dung khi nao, khac Set o dau?
-- [ ] HyperLogLog la gi, tai sao khong dung Set de dem unique?
-- [ ] Pub/Sub mat message khi consumer offline — dung hay sai?
-- [ ] Streams khac Pub/Sub o dieu gi?
-- [ ] MULTI/EXEC co giong SQL transaction khong?
-- [ ] WATCH dung de lam gi?
-- [ ] Lua script co gi hon Pipeline?
-- [ ] Pipeline co atomic khong?
-- [ ] RDB vs AOF — chon cai nao cho production?
+- [ ] Bitmap dùng khi nào, khác Set ở đâu?
+- [ ] HyperLogLog là gì, tại sao không dùng Set để đếm unique?
+- [ ] Pub/Sub mất message khi consumer offline — đúng hay sai?
+- [ ] Streams khác Pub/Sub ở điều gì?
+- [ ] MULTI/EXEC có giống SQL transaction không?
+- [ ] WATCH dùng để làm gì?
+- [ ] Lua script có gì hơn Pipeline?
+- [ ] Pipeline có atomic không?
+- [ ] RDB vs AOF — chọn cái nào cho production?
 
 **Context Project**: Timekeeping System — NestJS backend, PostgreSQL source of truth. Scale: ~500-2000 employees.
 
@@ -42,9 +42,9 @@ Redis persistence durability
 
 ## 1. Bitmap
 
-### 1.1 La Gi?
+### 1.1 Là Gì?
 
-Bitmap la String duoc dung nhu mot mang bit. Moi bit co the SETBIT/GETBIT theo offset.
+Bitmap là String được dùng như một mảng bit. Mỗi bit có thể SETBIT/GETBIT theo offset.
 
 ```
 Key: attendance:2026-07-08
@@ -53,112 +53,112 @@ Offset 100 = employee ID 100
 Offset 999 = employee ID 999
 ```
 
-Toi da 2^32 bit = 512MB = 4 billion employee IDs — trong thuc te, 2000 employees chi dung **2000 bits = 250 bytes**.
+Tối đa 2^32 bit = 512MB = 4 billion employee IDs — trong thực tế, 2000 employees chỉ dùng **2000 bits = 250 bytes**.
 
 ### 1.2 Use Case
 
 | Use Case | Key Pattern | Offset |
 |---|---|---|
 | Daily attendance flag | `attendance:{date}` | employee_id |
-| Monthly attendance | `attendance:monthly:{emp_id}:{year_month}` | ngay trong thang (1-31) |
+| Monthly attendance | `attendance:monthly:{emp_id}:{year_month}` | ngày trong tháng (1-31) |
 | Feature flag per user | `feature:new-ui:{date}` | user_id |
 | Daily active users | `dau:{date}` | user_id |
 
 ### 1.3 Commands
 
 ```bash
-# Danh dau employee 100 da check-in ngay 2026-07-08
+# Đánh dấu employee 100 đã check-in ngày 2026-07-08
 SETBIT attendance:2026-07-08 100 1
-# Ket qua: 0 (gia tri cu cua bit do)
+# Kết quả: 0 (giá trị cũ của bit đó)
 
-# Danh dau them
+# Đánh dấu thêm
 SETBIT attendance:2026-07-08 101 1
 SETBIT attendance:2026-07-08 102 1
 SETBIT attendance:2026-07-08 50 1
 
-# Kiem tra employee 100 da check-in chua
-GETBIT attendance:2026-07-08 100    # 1 (da check-in)
-GETBIT attendance:2026-07-08 999    # 0 (chua check-in)
+# Kiểm tra employee 100 đã check-in chưa
+GETBIT attendance:2026-07-08 100    # 1 (đã check-in)
+GETBIT attendance:2026-07-08 999    # 0 (chưa check-in)
 
-# Dem tong so nguoi da check-in (dem so bit = 1)
+# Đếm tổng số người đã check-in (đếm số bit = 1)
 BITCOUNT attendance:2026-07-08         # 4
 
-# Dem trong khoang byte (range la byte, khong phai bit)
-BITCOUNT attendance:2026-07-08 0 -1   # Tat ca
+# Đếm trong khoảng byte (range là byte, không phải bit)
+BITCOUNT attendance:2026-07-08 0 -1   # Tất cả
 
-# BITPOS: tim bit dau tien co gia tri 0 hoac 1
-BITPOS attendance:2026-07-08 1        # Tim bit 1 dau tien (employee check-in som nhat theo ID)
-BITPOS attendance:2026-07-08 0        # Tim bit 0 dau tien (employee chua check-in co ID nho nhat)
+# BITPOS: tìm bit đầu tiên có giá trị 0 hoặc 1
+BITPOS attendance:2026-07-08 1        # Tìm bit 1 đầu tiên (employee check-in sớm nhất theo ID)
+BITPOS attendance:2026-07-08 0        # Tìm bit 0 đầu tiên (employee chưa check-in có ID nhỏ nhất)
 
-# BITOP: phep toan bitwise giua nhieu key
+# BITOP: phép toán bitwise giữa nhiều key
 BITOP AND result:both attendance:2026-07-07 attendance:2026-07-08
-# result:both = employees da check-in CA HAI ngay
+# result:both = employees đã check-in CẢ HAI ngày
 
 BITOP OR result:either attendance:2026-07-07 attendance:2026-07-08
-# result:either = employees da check-in IT NHAT MOT trong hai ngay
+# result:either = employees đã check-in ÍT NHẤT MỘT trong hai ngày
 
 BITOP NOT result:absent attendance:2026-07-08
-# result:absent = employees CHUA check-in (bit flip)
+# result:absent = employees CHƯA check-in (bit flip)
 ```
 
-### 1.4 Bitmap vs Set — Khi Nao Dung Cai Nao?
+### 1.4 Bitmap vs Set — Khi Nào Dùng Cái Nào?
 
-| Tieu chi | Bitmap | Set |
+| Tiêu chí | Bitmap | Set |
 |---|---|---|
 | Member type | Integer offset | Any string |
-| Memory | Rat tiet kiem (bit-level) | Lon hon (string overhead) |
+| Memory | Rất tiết kiệm (bit-level) | Lớn hơn (string overhead) |
 | Membership check | O(1) GETBIT | O(1) SISMEMBER |
 | Count members | O(n) BITCOUNT | O(1) SCARD |
 | Set operations | BITOP AND/OR/XOR | SINTER/SUNION/SDIFF |
-| Lay danh sach member | Kho (phai scan tung bit) | SMEMBERS |
-| Range offset lon | Gap ton memory | Khong bi anh huong |
+| Lấy danh sách member | Khó (phải scan từng bit) | SMEMBERS |
+| Range offset lớn | Gặp tốn memory | Không bị ảnh hưởng |
 
 **Rule**:
-- Member ID la so nguyen, so luong lon, can tiet kiem memory → **Bitmap**
-- Can lay danh sach member, member la string → **Set**
+- Member ID là số nguyên, số lượng lớn, cần tiết kiệm memory → **Bitmap**
+- Cần lấy danh sách member, member là string → **Set**
 
-**Caution**: Neu employee ID lon (vd: UUID hoac ID = 10_000_000) → Bitmap ton memory vi se allocate het cac byte trung gian. Bitmap toi uu nhat khi IDs dense va tu 0.
+**Caution**: Nếu employee ID lớn (vd: UUID hoặc ID = 10_000_000) → Bitmap tốn memory vì sẽ allocate hết các byte trung gian. Bitmap tối ưu nhất khi IDs dense và từ 0.
 
 ### 1.5 Production Pitfalls
 
-**P1: Sparse Bitmap Gap Memory**
+**P1: Sparse Bitmap Gặp Memory**
 ```bash
-# Employee ID = 1,000,000 → Bitmap phai allocate ~125KB chi cho 1 bit
+# Employee ID = 1,000,000 → Bitmap phải allocate ~125KB chỉ cho 1 bit
 SETBIT attendance:2026-07-08 1000000 1
-MEMORY USAGE attendance:2026-07-08    # ~125KB chi cho 1 entry
+MEMORY USAGE attendance:2026-07-08    # ~125KB chỉ cho 1 entry
 ```
-Giai phap: Neu ID khong lien tuc, dung Set hoac map ID thanh dense index.
+Giải pháp: Nếu ID không liên tục, dùng Set hoặc map ID thành dense index.
 
-**P2: BITCOUNT la O(n)**
+**P2: BITCOUNT là O(n)**
 ```bash
-# BITCOUNT tren 1MB bitmap → O(n) theo byte length
-# Tuong doi nhanh nhung van block neu bitmap rat lon
-BITCOUNT huge-bitmap    # Caution tren bitmap > 10MB
+# BITCOUNT trên 1MB bitmap → O(n) theo byte length
+# Tương đối nhanh nhưng vẫn block nếu bitmap rất lớn
+BITCOUNT huge-bitmap    # Caution trên bitmap > 10MB
 ```
 
 ---
 
 ## 2. HyperLogLog
 
-### 2.1 La Gi?
+### 2.1 Là Gì?
 
-HyperLogLog (HLL) la probabilistic data structure de **dem unique elements** voi sai so xap xi **0.81%**, dung **toi da 12KB memory** bat ke co bao nhieu phan tu.
+HyperLogLog (HLL) là probabilistic data structure để **đếm unique elements** với sai số xấp xỉ **0.81%**, dùng **tối đa 12KB memory** bất kể có bao nhiêu phần tử.
 
-So sanh voi Set:
+So sánh với Set:
 
-| Tieu chi | Set | HyperLogLog |
+| Tiêu chí | Set | HyperLogLog |
 |---|---|---|
 | Memory 1M unique | ~50-100MB | ~12KB |
-| Chinh xac | 100% exact | ~99.19% (+-0.81%) |
-| Lay danh sach | SMEMBERS | Khong the |
+| Chính xác | 100% exact | ~99.19% (+-0.81%) |
+| Lấy danh sách | SMEMBERS | Không thể |
 | Union | SUNIONSTORE | PFMERGE |
-| Use case | Can exact, can danh sach | Chi can count, tiet kiem memory |
+| Use case | Cần exact, cần danh sách | Chỉ cần count, tiết kiệm memory |
 
 ### 2.2 Use Case
 
 | Use Case | Key Pattern |
 |---|---|
-| Unique active employees theo ngay | `hll:active-emp:{date}` |
+| Unique active employees theo ngày | `hll:active-emp:{date}` |
 | Unique visitors dashboard | `hll:dashboard-visitors:{date}` |
 | Unique IPs per endpoint | `hll:ip:{endpoint}:{date}` |
 | Unique features used | `hll:feature:{feature_name}:{month}` |
@@ -166,46 +166,46 @@ So sanh voi Set:
 ### 2.3 Commands
 
 ```bash
-# Add unique employees duoc het ngay
+# Add unique employees được hết ngày
 PFADD hll:active-emp:2026-07-08 emp100
 PFADD hll:active-emp:2026-07-08 emp101 emp102 emp103
-PFADD hll:active-emp:2026-07-08 emp100   # Trung lap → khong tang count
+PFADD hll:active-emp:2026-07-08 emp100   # Trùng lặp → không tăng count
 
-# Dem so luong unique (xap xi)
+# Đếm số lượng unique (xấp xỉ)
 PFCOUNT hll:active-emp:2026-07-08        # ~3
 
-# Merge nhieu HLL lai de dem union
+# Merge nhiều HLL lại để đếm union
 PFADD hll:active-emp:2026-07-07 emp100 emp200 emp300
 PFMERGE hll:active-emp:week hll:active-emp:2026-07-07 hll:active-emp:2026-07-08
 PFCOUNT hll:active-emp:week             # ~5 (emp100, emp101, emp102, emp103, emp200, emp300)
 ```
 
-### 2.4 Khi Nao Dung HyperLogLog?
+### 2.4 Khi Nào Dùng HyperLogLog?
 
-**Dung HLL khi**:
-- Chi can biet **bao nhieu** unique (khong can biet LA NHUNG AI)
-- Volume lon (trieu+ unique)
-- Chap nhan sai so nho (~0.81%)
-- Memory la uu tien
+**Dùng HLL khi**:
+- Chỉ cần biết **bao nhiêu** unique (không cần biết LÀ NHỮNG AI)
+- Volume lớn (triệu+ unique)
+- Chấp nhận sai số nhỏ (~0.81%)
+- Memory là ưu tiên
 
-**Khong dung HLL khi**:
-- Can biet chinh xac 100%
-- Can lay danh sach member
-- Volume nho → dung Set binh thuong
+**Không dùng HLL khi**:
+- Cần biết chính xác 100%
+- Cần lấy danh sách member
+- Volume nhỏ → dùng Set bình thường
 
-**Timekeeping context**: HLL hop ly cho "bao nhieu employee unique da mo dashboard hom nay". Khong hop ly cho "ai da check-in" (phai biet danh sach cu the).
+**Timekeeping context**: HLL hợp lý cho "bao nhiêu employee unique đã mở dashboard hôm nay". Không hợp lý cho "ai đã check-in" (phải biết danh sách cụ thể).
 
 ### 2.5 Production Pitfall
 
-**HLL khong merge duoc voi Set/ZSet** — la data structure rieng biet. Khong the lay ra danh sach. Mot khi da chon HLL, khong lay lai duoc members.
+**HLL không merge được với Set/ZSet** — là data structure riêng biệt. Không thể lấy ra danh sách. Một khi đã chọn HLL, không lấy lại được members.
 
 ---
 
 ## 3. Pub/Sub
 
-### 3.1 La Gi?
+### 3.1 Là Gì?
 
-Pub/Sub la messaging model **fire-and-forget**: publisher gui message toi channel, tat ca subscriber dang listen deu nhan. Khong co persistence.
+Pub/Sub là messaging model **fire-and-forget**: publisher gửi message tới channel, tất cả subscriber đang listen đều nhận. Không có persistence.
 
 ```
 Publisher → [channel: attendance-events] → Subscriber A
@@ -218,17 +218,17 @@ Publisher → [channel: attendance-events] → Subscriber A
 ```bash
 # --- Terminal 1: Subscribe ---
 SUBSCRIBE attendance-events
-# Blocking — nhan het message gui toi channel nay
+# Blocking — nhận hết message gửi tới channel này
 
-# Subscribe nhieu channel
+# Subscribe nhiều channel
 SUBSCRIBE attendance-events shift-events
 
 # Pattern subscribe (wildcard)
-PSUBSCRIBE attendance-*    # Nhan tat ca channel bat dau bang "attendance-"
+PSUBSCRIBE attendance-*    # Nhận tất cả channel bắt đầu bằng "attendance-"
 
 # --- Terminal 2: Publish ---
 PUBLISH attendance-events '{"employee_id":100,"type":"check_in","timestamp":"2026-07-08T08:00:00"}'
-# Ket qua: so luong subscriber da nhan
+# Kết quả: số lượng subscriber đã nhận
 
 PUBLISH attendance-events '{"employee_id":101,"type":"check_out","timestamp":"2026-07-08T17:00:00"}'
 
@@ -249,118 +249,118 @@ Subscriber 2: Notification service
 Subscriber 3: Log aggregator
 ```
 
-### 3.4 Pub/Sub Limitations — QUAN TRONG
+### 3.4 Pub/Sub Limitations — QUAN TRỌNG
 
-| Diem yeu | Hau qua | Giai phap |
+| Điểm yếu | Hậu quả | Giải pháp |
 |---|---|---|
-| Consumer offline → mat message | Notification bi mat | Dung Streams |
-| Khong co persistence | Redis restart → mat tat ca message dang pending | Dung Streams |
-| Khong co ack | Khong biet consumer da xu ly xong chua | Dung Streams |
-| Khong co retry | Consumer fail → message mat | Dung Streams |
-| Slow consumer block nhanh | Redis buffer day → ngat ket noi | Streams hoac buffer consumer |
+| Consumer offline → mất message | Notification bị mất | Dùng Streams |
+| Không có persistence | Redis restart → mất tất cả message đang pending | Dùng Streams |
+| Không có ack | Không biết consumer đã xử lý xong chưa | Dùng Streams |
+| Không có retry | Consumer fail → message mất | Dùng Streams |
+| Slow consumer block nhanh | Redis buffer đầy → ngắt kết nối | Streams hoặc buffer consumer |
 
-**Rule**: Pub/Sub chi tot cho **realtime notification nhe, mat duoc**. Neu can reliable → **Streams**.
+**Rule**: Pub/Sub chỉ tốt cho **realtime notification nhẹ, mất được**. Nếu cần reliable → **Streams**.
 
 ### 3.5 Pub/Sub vs Streams vs List
 
-| Tieu chi | Pub/Sub | Streams | List (BLPOP) |
+| Tiêu chí | Pub/Sub | Streams | List (BLPOP) |
 |---|---|---|---|
-| Durability | Khong | Co | Co |
-| Ack | Khong | Co | Khong |
-| Consumer group | Khong | Co | Khong |
+| Durability | Không | Có | Có |
+| Ack | Không | Có | Không |
+| Consumer group | Không | Có | Không |
 | Multiple consumers | Broadcast | Fan-out theo group | Compete consume |
-| Replay history | Khong | Co (XREAD from ID) | Khong |
-| Pending/retry | Khong | Co (XPENDING/XCLAIM) | Khong |
+| Replay history | Không | Có (XREAD từ ID) | Không |
+| Pending/retry | Không | Có (XPENDING/XCLAIM) | Không |
 | Use case | Live notification | Reliable event processing | Simple queue |
 
 ---
 
 ## 4. Streams
 
-### 4.1 La Gi?
+### 4.1 Là Gì?
 
-Redis Streams la **append-only log** voi:
-- Message ID co thu tu (timestamp-sequence)
+Redis Streams là **append-only log** với:
+- Message ID có thứ tự (timestamp-sequence)
 - Consumer groups (multiple consumers chia nhau work)
 - Message acknowledgement
-- Pending entries (chua duoc ack)
-- Retry / claim (lay lai message chua xu ly)
+- Pending entries (chưa được ack)
+- Retry / claim (lấy lại message chưa xử lý)
 
-Tuong tu Kafka nhung nhe hon, native trong Redis.
+Tương tự Kafka nhưng nhẹ hơn, native trong Redis.
 
 ### 4.2 Stream ID
 
-Moi message co ID dinh dang: `{milliseconds}-{sequence}`
+Mỗi message có ID định dạng: `{milliseconds}-{sequence}`
 
 ```
 1751940000000-0    # Timestamp ms = 2026-07-08 08:00:00, sequence = 0
-1751940000000-1    # Cung timestamp, sequence tiep theo
-*                  # Redis tu sinh ID theo thoi gian thuc
+1751940000000-1    # Cùng timestamp, sequence tiếp theo
+*                  # Redis tự sinh ID theo thời gian thực
 ```
 
 ### 4.3 Commands — Core
 
 ```bash
-# XADD: Them message vao stream
+# XADD: Thêm message vào stream
 XADD stream:attendance-events * employee_id 100 type check_in timestamp 2026-07-08T08:00:00
-# * = tu dong sinh ID
-# Ket qua: "1751940000000-0"
+# * = tự động sinh ID
+# Kết quả: "1751940000000-0"
 
 XADD stream:attendance-events * employee_id 101 type check_in timestamp 2026-07-08T08:05:00
-# Ket qua: "1751940300000-0"
+# Kết quả: "1751940300000-0"
 
-# XLEN: Dem so message trong stream
+# XLEN: Đếm số message trong stream
 XLEN stream:attendance-events    # 2
 
-# XRANGE: Doc message tu ID bat dau den ID ket thuc
-XRANGE stream:attendance-events - +               # Tat ca message
-XRANGE stream:attendance-events - + COUNT 10      # 10 message dau
-XRANGE stream:attendance-events 1751940000000-0 + # Tu ID nay tro di
+# XRANGE: Đọc message từ ID bắt đầu đến ID kết thúc
+XRANGE stream:attendance-events - +               # Tất cả message
+XRANGE stream:attendance-events - + COUNT 10      # 10 message đầu
+XRANGE stream:attendance-events 1751940000000-0 + # Từ ID này trở đi
 
-# XREVRANGE: Doc nguoc
-XREVRANGE stream:attendance-events + - COUNT 5   # 5 message moi nhat
+# XREVRANGE: Đọc ngược
+XREVRANGE stream:attendance-events + - COUNT 5   # 5 message mới nhất
 
-# XREAD: Doc message tu nhieu stream
+# XREAD: Đọc message từ nhiều stream
 XREAD COUNT 10 STREAMS stream:attendance-events 0
-# 0 = doc tu dau
-# $ = chi lay message moi sau thoi diem nay
+# 0 = đọc từ đầu
+# $ = chỉ lấy message mới sau thời điểm này
 
 # XREAD blocking (consumer pattern)
 XREAD COUNT 10 BLOCK 5000 STREAMS stream:attendance-events $
-# Doi toi da 5 giay cho message moi
+# Đợi tối đa 5 giây cho message mới
 ```
 
 ### 4.4 Consumer Groups
 
-Consumer group cho phep nhieu worker chia nhau xu ly message (fan-out theo cong viec, khong broadcast).
+Consumer group cho phép nhiều worker chia nhau xử lý message (fan-out theo công việc, không broadcast).
 
 ```bash
-# Tao consumer group
+# Tạo consumer group
 XGROUP CREATE stream:attendance-events workers $ MKSTREAM
-# workers = ten group
-# $ = chi doc message moi tu bay gio (dung 0 de doc tu dau)
-# MKSTREAM = tao stream neu chua co
+# workers = tên group
+# $ = chỉ đọc message mới từ bây giờ (dùng 0 để đọc từ đầu)
+# MKSTREAM = tạo stream nếu chưa có
 
-# --- Worker 1 lay message ---
+# --- Worker 1 lấy message ---
 XREADGROUP GROUP workers worker-1 COUNT 5 STREAMS stream:attendance-events >
-# > = lay message chua duoc deliver cho bat ky consumer nao trong group
+# > = lấy message chưa được deliver cho bất kỳ consumer nào trong group
 
-# --- Worker 2 lay message khac ---
+# --- Worker 2 lấy message khác ---
 XREADGROUP GROUP workers worker-2 COUNT 5 STREAMS stream:attendance-events >
 
-# --- Worker 1 ack sau khi xu ly xong ---
+# --- Worker 1 ack sau khi xử lý xong ---
 XACK stream:attendance-events workers 1751940000000-0
-# Neu khong XACK, message nam trong pending list
+# Nếu không XACK, message nằm trong pending list
 
-# Xem pending messages (chua duoc ack)
+# Xem pending messages (chưa được ack)
 XPENDING stream:attendance-events workers - + 10
-# Hien thi: message ID, consumer dang giu, thoi gian giu, so lan deliver
+# Hiển thị: message ID, consumer đang giữ, thời gian giữ, số lần deliver
 
-# XCLAIM: Lay lai message cua consumer chet/timeout
+# XCLAIM: Lấy lại message của consumer chết/timeout
 XCLAIM stream:attendance-events workers worker-2 30000 1751940000000-0
-# 30000ms = message nay da nam pending > 30s → claim lai
+# 30000ms = message này đã nằm pending > 30s → claim lại
 
-# XAUTOCLAIM: Tu dong claim nhieu message pending
+# XAUTOCLAIM: Tự động claim nhiều message pending
 XAUTOCLAIM stream:attendance-events workers worker-2 30000 0-0 COUNT 10
 ```
 
@@ -373,30 +373,30 @@ XADD stream:attendance-events * emp_id 100 type check_in
 
         ↓ [consumer group: workers]
         
-Worker 1: doc message, luu vao PostgreSQL, XACK
-Worker 2: doc message, gui notification, XACK
-Worker 3: doc message, update dashboard cache, XACK
+Worker 1: đọc message, lưu vào PostgreSQL, XACK
+Worker 2: đọc message, gửi notification, XACK
+Worker 3: đọc message, update dashboard cache, XACK
 ```
 
 **Dead Letter Queue pattern**:
 ```bash
-# Monitor: message bi deliver > 3 lan ma van chua ack
+# Monitor: message bị deliver > 3 lần mà vẫn chưa ack
 XPENDING stream:attendance-events workers - + 100
 
-# Neu deliver_count > 3 → move sang DLQ
+# Nếu deliver_count > 3 → move sang DLQ
 XADD stream:attendance-events:dlq * original_id {id} reason "max_retries_exceeded"
 XACK stream:attendance-events workers {id}
 ```
 
-### 4.6 Giu Stream Khong Lon Vo Han
+### 4.6 Giữ Stream Không Lớn Vô Hạn
 
 ```bash
-# MAXLEN: Gioi han so message trong stream
+# MAXLEN: Giới hạn số message trong stream
 XADD stream:attendance-events MAXLEN ~ 10000 * emp_id 100 type check_in
-# ~ = approximate trim (nhanh hon exact MAXLEN)
-# Giu toi da 10000 message moi nhat
+# ~ = approximate trim (nhanh hơn exact MAXLEN)
+# Giữ tối đa 10000 message mới nhất
 
-# Trim thu cong
+# Trim thủ công
 XTRIM stream:attendance-events MAXLEN ~ 10000
 ```
 
@@ -407,64 +407,64 @@ XTRIM stream:attendance-events MAXLEN ~ 10000
 ### 5.1 MULTI/EXEC
 
 ```bash
-MULTI              # Bat dau transaction — moi command sau do bi queue
+MULTI              # Bắt đầu transaction — mỗi command sau đó bị queue
 INCR stats:checkin:2026-07-08
 EXPIRE stats:checkin:2026-07-08 86400
 HSET summary:2026-07-08 total 1 late 0
-EXEC               # Thuc thi tat ca command da queue
+EXEC               # Thực thi tất cả command đã queue
 ```
 
-**Ket qua EXEC**: Tra ve array cac ket qua cua tung command.
+**Kết quả EXEC**: Trả về array các kết quả của từng command.
 
-**DISCARD**: Huy bo transaction, xoa queue.
+**DISCARD**: Hủy bỏ transaction, xóa queue.
 
 ```bash
 MULTI
 INCR stats:checkin:2026-07-08
-DISCARD            # Xoa het, khong thuc thi gi
+DISCARD            # Xóa hết, không thực thi gì
 ```
 
-### 5.2 Redis Transaction Khac SQL Transaction The Nao?
+### 5.2 Redis Transaction Khác SQL Transaction Thế Nào?
 
-| Tieu chi | SQL Transaction | Redis MULTI/EXEC |
+| Tiêu chí | SQL Transaction | Redis MULTI/EXEC |
 |---|---|---|
-| Rollback khi command loi | Co (ROLLBACK) | Khong — command khac van chay |
-| Rollback khi runtime error | Co | Khong — command loi bi skip, command khac chay tiep |
-| Syntax error | Rollback tat ca | Discard tat ca (biet ngay) |
-| Isolation | ACID isolation | Khong isolation — command khac van vao duoc |
-| Atomicity | Day du | Chi atomicity theo nghia "tat ca hay khong co gi" cho syntax, khong phai logic |
+| Rollback khi command lỗi | Có (ROLLBACK) | Không — command khác vẫn chạy |
+| Rollback khi runtime error | Có | Không — command lỗi bị skip, command khác chạy tiếp |
+| Syntax error | Rollback tất cả | Discard tất cả (biết ngay) |
+| Isolation | ACID isolation | Không isolation — command khác vẫn vào được |
+| Atomicity | Đầy đủ | Chỉ atomicity theo nghĩa "tất cả hay không có gì" cho syntax, không phải logic |
 
 ```bash
 MULTI
 INCR counter:1         # OK
-LPUSH counter:1 "foo"  # Runtime error (sai type) nhung EXEC van chay
-INCR counter:2         # Van duoc thuc thi du lenh truoc loi
+LPUSH counter:1 "foo"  # Runtime error (sai type) nhưng EXEC vẫn chạy
+INCR counter:2         # Vẫn được thực thi dù lệnh trước lỗi
 EXEC
-# Ket qua: [1, ERROR, 1]
-# counter:2 da tang — khong co rollback!
+# Kết quả: [1, ERROR, 1]
+# counter:2 đã tăng — không có rollback!
 ```
 
-**Ket luan**: Redis MULTI/EXEC dam bao **nhom command chay khong bi xen giua**, nhung **khong co rollback logic** nhu SQL.
+**Kết luận**: Redis MULTI/EXEC đảm bảo **nhóm command chạy không bị xen giữa**, nhưng **không có rollback logic** như SQL.
 
 ### 5.3 WATCH — Optimistic Locking
 
-WATCH cho phep detect neu key bi thay doi truoc khi EXEC.
+WATCH cho phép detect nếu key bị thay đổi trước khi EXEC.
 
 ```bash
-# Pattern: Tang quota cua employee neu con du
+# Pattern: Tăng quota của employee nếu còn đủ
 
 WATCH quota:employee:100
 current = GET quota:employee:100    # 5
 
-# Neu quota:employee:100 bi thay doi boi client khac sau WATCH va truoc EXEC...
+# Nếu quota:employee:100 bị thay đổi bởi client khác sau WATCH và trước EXEC...
 MULTI
 DECR quota:employee:100
 EXEC
-# → nil (abort) neu quota:employee:100 da bi thay doi
-# → [4] neu thanh cong (khong ai chen vao)
+# → nil (abort) nếu quota:employee:100 đã bị thay đổi
+# → [4] nếu thành công (không ai chen vào)
 ```
 
-**Ung dung thuc te**:
+**Ứng dụng thực tế**:
 ```typescript
 // NestJS example: WATCH pattern
 async decrementQuota(empId: number): Promise<boolean> {
@@ -477,13 +477,13 @@ async decrementQuota(empId: number): Promise<boolean> {
     
     if (current <= 0) {
       await this.redis.unwatch();
-      return false; // Khong du quota
+      return false; // Không đủ quota
     }
     
     const multi = this.redis.multi();
     multi.decr(key);
-    result = await multi.exec(); // null neu WATCH detect thay doi
-  } while (result === null); // Retry neu bi abort
+    result = await multi.exec(); // null nếu WATCH detect thay đổi
+  } while (result === null); // Retry nếu bị abort
   
   return true;
 }
@@ -493,23 +493,23 @@ async decrementQuota(empId: number): Promise<boolean> {
 
 ## 6. Lua Scripting
 
-### 6.1 Tai Sao Dung Lua?
+### 6.1 Tại Sao Dùng Lua?
 
-Lua cho phep nhieu Redis command chay **atomic** trong mot cuoc goi. Trong khi:
-- Pipeline: Gom nhieu command nhung KHONG atomic
-- MULTI/EXEC: Atomic nhung KHONG co dieu kien (if/else)
-- Lua: Atomic VA co dieu kien/logic
+Lua cho phép nhiều Redis command chạy **atomic** trong một cuộc gọi. Trong khi:
+- Pipeline: Gom nhiều command nhưng KHÔNG atomic
+- MULTI/EXEC: Atomic nhưng KHÔNG có điều kiện (if/else)
+- Lua: Atomic VÀ có điều kiện/logic
 
-### 6.2 Syntax Co Ban
+### 6.2 Syntax Cơ Bản
 
 ```bash
 # EVAL "script" numkeys key1 key2 ... arg1 arg2 ...
 EVAL "return redis.call('GET', KEYS[1])" 1 cache:employee:100
-# 1 = so luong KEYS
+# 1 = số lượng KEYS
 # KEYS[1] = cache:employee:100
-# Ket qua: gia tri cua key
+# Kết quả: giá trị của key
 
-# Nhieu command
+# Nhiều command
 EVAL "
   local val = redis.call('GET', KEYS[1])
   if val then
@@ -520,11 +520,11 @@ EVAL "
 " 1 cache:employee:100 600
 ```
 
-### 6.3 Cac Pattern Pho Bien
+### 6.3 Các Pattern Phổ Biến
 
-**Pattern 1: Release Distributed Lock An Toan**
+**Pattern 1: Release Distributed Lock An Toàn**
 ```lua
--- Check value truoc khi DEL (tranh xoa lock cua process khac)
+-- Check value trước khi DEL (tránh xóa lock của process khác)
 if redis.call("GET", KEYS[1]) == ARGV[1] then
     return redis.call("DEL", KEYS[1])
 else
@@ -538,7 +538,7 @@ EVAL "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEY
 
 **Pattern 2: Atomic Rate Limiter**
 ```lua
--- Increment va set TTL trong mot buoc
+-- Increment và set TTL trong một bước
 local current = redis.call('GET', KEYS[1])
 if current == false then
     redis.call('SET', KEYS[1], 1, 'EX', ARGV[1])
@@ -555,18 +555,18 @@ EVAL "local c = redis.call('GET', KEYS[1]) if c == false then redis.call('SET', 
 
 **Pattern 3: Atomic Quota Check-and-Decrement**
 ```lua
--- Kiem tra quota du truoc khi giam
+-- Kiểm tra quota đủ trước khi giảm
 local quota = tonumber(redis.call('GET', KEYS[1]))
 if quota == nil or quota <= 0 then
-    return 0  -- Khong du quota
+    return 0  -- Không đủ quota
 end
 redis.call('DECR', KEYS[1])
-return 1  -- Thanh cong
+return 1  -- Thành công
 ```
 
-**Pattern 4: Cache Getset voi Conditional TTL**
+**Pattern 4: Cache Getset với Conditional TTL**
 ```lua
--- Lay gia tri, refresh TTL neu con song
+-- Lấy giá trị, refresh TTL nếu còn sống
 local val = redis.call('GET', KEYS[1])
 if val then
     local ttl = tonumber(redis.call('TTL', KEYS[1]))
@@ -581,36 +581,36 @@ return false
 ### 6.4 EVALSHA — Cache Script
 
 ```bash
-# Load script len Redis, nhan SHA
+# Load script lên Redis, nhận SHA
 SCRIPT LOAD "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end"
-# Ket qua: "3c6ef1aa7408a42dc97d9dc47c28d15d3069f4d7"
+# Kết quả: "3c6ef1aa7408a42dc97d9dc47c28d15d3069f4d7"
 
-# Goi bang SHA (nhanh hon, it bandwidth hon)
+# Gọi bằng SHA (nhanh hơn, ít bandwidth hơn)
 EVALSHA 3c6ef1aa7408a42dc97d9dc47c28d15d3069f4d7 1 lock:checkin:100:2026-07-08 "process-a-uuid"
 
-# Kiem tra script ton tai
+# Kiểm tra script tồn tại
 SCRIPT EXISTS 3c6ef1aa7408a42dc97d9dc47c28d15d3069f4d7
 ```
 
 ### 6.5 Lua Pitfalls
 
-| Pitfall | Hau qua | Giai phap |
+| Pitfall | Hậu quả | Giải pháp |
 |---|---|---|
-| Lua script chay qua lau | Block event loop | Giu script ngan, khong loop lon |
-| Script loi giua chung | Command truoc do van co hieu luc (khong rollback) | Test ky truoc deploy |
-| Ket qua Lua va Redis type | Lua nil khac Redis nil | Kiem tra ky type conversion |
-| KEYS[] bat dau tu 1, khong phai 0 | Index error | KEYS[1], KEYS[2], ... |
+| Lua script chạy quá lâu | Block event loop | Giữ script ngắn, không loop lớn |
+| Script lỗi giữa chừng | Command trước đó vẫn có hiệu lực (không rollback) | Test kỹ trước deploy |
+| Kết quả Lua và Redis type | Lua nil khác Redis nil | Kiểm tra kỹ type conversion |
+| KEYS[] bắt đầu từ 1, không phải 0 | Index error | KEYS[1], KEYS[2], ... |
 
 ---
 
 ## 7. Pipeline
 
-### 7.1 La Gi?
+### 7.1 Là Gì?
 
-Pipeline cho phep gui nhieu command len Redis trong mot network request, nhan tat ca ket qua mot lan.
+Pipeline cho phép gửi nhiều command lên Redis trong một network request, nhận tất cả kết quả một lần.
 
 ```
-Khong Pipeline:                  Pipeline:
+Không Pipeline:                  Pipeline:
 Client → COMMAND 1 → Server      Client → [CMD1, CMD2, CMD3] → Server
 Client ← response 1 ← Server     Client ← [res1, res2, res3] ← Server
 Client → COMMAND 2 → Server
@@ -619,17 +619,17 @@ Client → COMMAND 3 → Server
 Client ← response 3 ← Server
 ```
 
-**Network round-trip**: 3 commands = 3 RTTs → voi Pipeline = 1 RTT.
+**Network round-trip**: 3 commands = 3 RTTs → với Pipeline = 1 RTT.
 
-### 7.2 Pipeline KHONG Atomic
+### 7.2 Pipeline KHÔNG Atomic
 
 ```
-Khong Pipeline + MULTI/EXEC:        Pipeline:
-Toan bo atomic                      Moi command van rieng le
-Khong command nao chen vao duoc     Command khac co the chen vao giua
+Không Pipeline + MULTI/EXEC:        Pipeline:
+Toàn bộ atomic                      Mỗi command vẫn riêng lẻ
+Không command nào chen vào được     Command khác có thể chen vào giữa
 ```
 
-Pipeline chi giam **network latency**. Khong bao dam **atomicity**.
+Pipeline chỉ giảm **network latency**. Không bảo đảm **atomicity**.
 
 ### 7.3 Use Cases
 
@@ -648,7 +648,7 @@ async warmEmployeeCache(ids: number[]): Promise<void> {
   await pipeline.exec();
 }
 
-// Bulk get: doc cache cua nhieu employee
+// Bulk get: đọc cache của nhiều employee
 async bulkGetEmployees(ids: number[]): Promise<(Employee | null)[]> {
   const pipeline = this.redis.pipeline();
   for (const id of ids) {
@@ -664,29 +664,29 @@ async bulkGetEmployees(ids: number[]): Promise<(Employee | null)[]> {
 
 ### 7.4 Pipeline vs MULTI/EXEC vs Lua
 
-| Tieu chi | Pipeline | MULTI/EXEC | Lua |
+| Tiêu chí | Pipeline | MULTI/EXEC | Lua |
 |---|---|---|---|
-| Giam network RTT | Co | Co (1 round trip) | Co (1 round trip) |
-| Atomic | Khong | Co | Co |
-| Dieu kien (if/else) | Khong | Khong | Co |
-| Block server | It hon | It hon | Co the (neu script lon) |
-| Use case | Bulk get/set, batch | Nhom command khong logic | Complex atomic logic |
+| Giảm network RTT | Có | Có (1 round trip) | Có (1 round trip) |
+| Atomic | Không | Có | Có |
+| Điều kiện (if/else) | Không | Không | Có |
+| Block server | Ít hơn | Ít hơn | Có thể (nếu script lớn) |
+| Use case | Bulk get/set, batch | Nhóm command không logic | Complex atomic logic |
 
 **Decision tree**:
-- Chi can giam network → **Pipeline**
-- Can nhom atomic, khong logic → **MULTI/EXEC**
-- Can atomic + logic → **Lua**
+- Chỉ cần giảm network → **Pipeline**
+- Cần nhóm atomic, không logic → **MULTI/EXEC**
+- Cần atomic + logic → **Lua**
 
 ### 7.5 Pipeline Pitfalls
 
-| Pitfall | Hau qua | Giai phap |
+| Pitfall | Hậu quả | Giải pháp |
 |---|---|---|
-| Pipeline qua lon | Memory spike o client va server | Batch theo nhom 100-500 |
-| Lam nham pipeline voi atomic | Race condition | Dung MULTI/EXEC neu can atomic |
-| Error handling trong pipeline | Mot command loi khong ngung cai khac | Kiem tra ket qua tung command |
+| Pipeline quá lớn | Memory spike ở client và server | Batch theo nhóm 100-500 |
+| Lầm nhầm pipeline với atomic | Race condition | Dùng MULTI/EXEC nếu cần atomic |
+| Error handling trong pipeline | Một command lỗi không ngưng cái khác | Kiểm tra kết quả từng command |
 
 ```typescript
-// Batch pipeline theo chunk de tranh memory spike
+// Batch pipeline theo chunk để tránh memory spike
 async bulkSet(items: {key: string, value: string, ttl: number}[]): Promise<void> {
   const CHUNK_SIZE = 200;
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
@@ -700,92 +700,92 @@ async bulkSet(items: {key: string, value: string, ttl: number}[]): Promise<void>
 
 ---
 
-## 8. Persistence — Gioi Thieu
+## 8. Persistence — Giới Thiệu
 
-Day 4 se hoc sau. Day 2 hieu concept de biet luc configure.
+Day 4 sẽ học sau. Day 2 hiểu concept để biết lúc configure.
 
 ### 8.1 RDB (Redis Database Snapshot)
 
-RDB = Periodic snapshot cua toan bo data, luu thanh binary file `.rdb`.
+RDB = Periodic snapshot của toàn bộ data, lưu thành binary file `.rdb`.
 
 ```
-Redis RAM → [BGSAVE moi 15 phut] → /data/dump.rdb (binary)
+Redis RAM → [BGSAVE mỗi 15 phút] → /data/dump.rdb (binary)
 ```
 
-**Dac diem**:
+**Đặc điểm**:
 - File compact, load nhanh khi restart
-- Co the mat data giua 2 lan snapshot
-- It anh huong performance (BGSAVE dung fork)
+- Có thể mất data giữa 2 lần snapshot
+- Ít ảnh hưởng performance (BGSAVE dùng fork)
 
-**Cau hinh mac dinh**:
+**Cấu hình mặc định**:
 ```
-save 3600 1     # Neu >= 1 key thay doi trong 1 gio → snapshot
-save 300 100    # Neu >= 100 key thay doi trong 5 phut → snapshot
-save 60 10000   # Neu >= 10000 key thay doi trong 1 phut → snapshot
+save 3600 1     # Nếu >= 1 key thay đổi trong 1 giờ → snapshot
+save 300 100    # Nếu >= 100 key thay đổi trong 5 phút → snapshot
+save 60 10000   # Nếu >= 10000 key thay đổi trong 1 phút → snapshot
 ```
 
 ### 8.2 AOF (Append-Only File)
 
-AOF = Ghi moi write command vao file log.
+AOF = Ghi mỗi write command vào file log.
 
 ```
-Redis RAM → [ghi moi command] → /data/appendonly.aof (text/binary)
+Redis RAM → [ghi mỗi command] → /data/appendonly.aof (text/binary)
 ```
 
-**Dac diem**:
-- It mat data hon RDB (co the chi mat 1 second)
-- File lon hon RDB
-- Co the rewrite/compact de thu nho (BGREWRITEAOF)
+**Đặc điểm**:
+- Ít mất data hơn RDB (có thể chỉ mất 1 second)
+- File lớn hơn RDB
+- Có thể rewrite/compact để thu nhỏ (BGREWRITEAOF)
 
 **Fsync options**:
 ```
-appendfsync always      # Flush moi command → an toan nhat, cham nhat
-appendfsync everysec    # Flush moi giay → balance tot (mat toi da 1 giay data)
-appendfsync no          # OS quyet dinh → nhanh nhat, mat nhieu nhat
+appendfsync always      # Flush mỗi command → an toàn nhất, chậm nhất
+appendfsync everysec    # Flush mỗi giây → balance tốt (mất tối đa 1 giây data)
+appendfsync no          # OS quyết định → nhanh nhất, mất nhiều nhất
 ```
 
 ### 8.3 No Persistence — Pure Cache
 
 ```
 # redis.conf
-save ""           # Tat RDB
-appendonly no     # Tat AOF
+save ""           # Tắt RDB
+appendonly no     # Tắt AOF
 ```
 
-Restart → mat tat ca. Dung cho pure cache layer, data lay lai tu PostgreSQL duoc.
+Restart → mất tất cả. Dùng cho pure cache layer, data lấy lại từ PostgreSQL được.
 
-### 8.4 Nen Chon Gi?
+### 8.4 Nên Chọn Gì?
 
 | Use case | Persistence mode |
 |---|---|
-| Pure cache (data lay lai duoc) | No persistence |
-| Cache + can recovery nhanh | RDB |
-| Session, lock, counter (mat it OK) | AOF everysec |
-| Khong muon mat data | AOF always hoac RDB + AOF |
+| Pure cache (data lấy lại được) | No persistence |
+| Cache + cần recovery nhanh | RDB |
+| Session, lock, counter (mất ít OK) | AOF everysec |
+| Không muốn mất data | AOF always hoặc RDB + AOF |
 
 **Timekeeping system**:
-- Session, OTP, lock → `AOF everysec` (mat toi da 1 giay OK)
-- Employee cache → No persistence (lay lai tu PostgreSQL khi restart)
+- Session, OTP, lock → `AOF everysec` (mất tối đa 1 giây OK)
+- Employee cache → No persistence (lấy lại từ PostgreSQL khi restart)
 
 ---
 
-## 9. Bai Tap Day 2
+## 9. Bài Tập Day 2
 
-### Bai 1: Bitmap Attendance
+### Bài 1: Bitmap Attendance
 
 ```bash
-# Setup: Danh dau attendance cho ngay 2026-07-08
+# Setup: Đánh dấu attendance cho ngày 2026-07-08
 SETBIT attendance:2026-07-08 50 1
 SETBIT attendance:2026-07-08 100 1
 SETBIT attendance:2026-07-08 101 1
 SETBIT attendance:2026-07-08 102 1
 SETBIT attendance:2026-07-08 200 1
 
-# Cau hoi:
-# 1. Employee 100 da check-in chua?
-# 2. Tong co bao nhieu nguoi check-in?
-# 3. Employee nao co ID nho nhat ma chua check-in?
-# 4. Employee nao da check-in CA HAI ngay 07 va 08?
+# Câu hỏi:
+# 1. Employee 100 đã check-in chưa?
+# 2. Tổng có bao nhiêu người check-in?
+# 3. Employee nào có ID nhỏ nhất mà chưa check-in?
+# 4. Employee nào đã check-in CẢ HAI ngày 07 và 08?
 
 SETBIT attendance:2026-07-07 100 1
 SETBIT attendance:2026-07-07 200 1
@@ -794,23 +794,23 @@ BITOP AND result:both attendance:2026-07-07 attendance:2026-07-08
 BITCOUNT result:both
 ```
 
-### Bai 2: HyperLogLog Dashboard
+### Bài 2: HyperLogLog Dashboard
 
 ```bash
-# Simulate employees dang mo dashboard
+# Simulate employees đang mở dashboard
 PFADD hll:dashboard:2026-07-08 emp100 emp101 emp102
-PFADD hll:dashboard:2026-07-08 emp100   # Trung lap
+PFADD hll:dashboard:2026-07-08 emp100   # Trùng lặp
 PFADD hll:dashboard:2026-07-08 emp103 emp104
 
-PFCOUNT hll:dashboard:2026-07-08        # Bao nhieu unique?
+PFCOUNT hll:dashboard:2026-07-08        # Bao nhiêu unique?
 
-# Merge voi ngay hom truoc
+# Merge với ngày hôm trước
 PFADD hll:dashboard:2026-07-07 emp100 emp200 emp300
 PFMERGE hll:dashboard:week hll:dashboard:2026-07-07 hll:dashboard:2026-07-08
 PFCOUNT hll:dashboard:week
 ```
 
-### Bai 3: Pub/Sub Check-in Event
+### Bài 3: Pub/Sub Check-in Event
 
 ```bash
 # Terminal 1: Subscribe
@@ -820,16 +820,16 @@ SUBSCRIBE attendance-events
 PUBLISH attendance-events '{"emp_id":100,"type":"check_in","time":"08:00"}'
 PUBLISH attendance-events '{"emp_id":101,"type":"check_in","time":"08:05"}'
 
-# Quan sat Terminal 1 nhan message khong?
+# Quan sát Terminal 1 nhận message không?
 
-# Thu: Dong Terminal 1, publish them message o Terminal 2
-# Quan sat: message bi mat
+# Thử: Đóng Terminal 1, publish thêm message ở Terminal 2
+# Quan sát: message bị mất
 ```
 
-### Bai 4: Streams Consumer Group
+### Bài 4: Streams Consumer Group
 
 ```bash
-# Tao stream va consumer group
+# Tạo stream và consumer group
 XGROUP CREATE stream:attendance-events workers $ MKSTREAM
 
 # Add message
@@ -837,54 +837,54 @@ XADD stream:attendance-events * emp_id 100 type check_in
 XADD stream:attendance-events * emp_id 101 type check_in
 XADD stream:attendance-events * emp_id 102 type check_out
 
-# Worker 1 doc va xu ly
+# Worker 1 đọc và xử lý
 XREADGROUP GROUP workers worker-1 COUNT 5 STREAMS stream:attendance-events >
 
-# Xem pending (chua ack)
+# Xem pending (chưa ack)
 XPENDING stream:attendance-events workers - + 10
 
-# Ack sau khi xu ly
+# Ack sau khi xử lý
 XACK stream:attendance-events workers {message-id-from-above}
 
-# Xem pending con lai
+# Xem pending còn lại
 XPENDING stream:attendance-events workers - + 10
 ```
 
-### Bai 5: Transaction MULTI/EXEC
+### Bài 5: Transaction MULTI/EXEC
 
 ```bash
-# Atomic: tang counter va set TTL
+# Atomic: tăng counter và set TTL
 MULTI
 INCR stats:checkin:2026-07-08
 EXPIRE stats:checkin:2026-07-08 86400
 EXEC
 
-# Quan sat: ca 2 command chay hay chi 1?
-# Thu loi: MULTI, LPUSH stats:checkin:2026-07-08 "foo", INCR stats:checkin:2026-07-08, EXEC
-# Quan sat: Redis xu ly loi the nao?
+# Quan sát: cả 2 command chạy hay chỉ 1?
+# Thử lỗi: MULTI, LPUSH stats:checkin:2026-07-08 "foo", INCR stats:checkin:2026-07-08, EXEC
+# Quan sát: Redis xử lý lỗi thế nào?
 ```
 
-### Bai 6: Lua Script Release Lock
+### Bài 6: Lua Script Release Lock
 
 ```bash
 # Setup lock
 SET lock:checkin:100:2026-07-08 "my-uuid-abc" NX EX 30
 
-# Release lock dung cach voi Lua
+# Release lock đúng cách với Lua
 EVAL "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end" 1 lock:checkin:100:2026-07-08 "my-uuid-abc"
-# Ket qua: 1 (thanh cong)
+# Kết quả: 1 (thành công)
 
-# Thu voi sai token
+# Thử với sai token
 SET lock:checkin:101:2026-07-08 "correct-uuid" NX EX 30
 EVAL "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end" 1 lock:checkin:101:2026-07-08 "wrong-uuid"
-# Ket qua: 0 (khong del, vi token sai)
+# Kết quả: 0 (không del, vì token sai)
 ```
 
-### Bai 7: Pipeline Bulk Cache
+### Bài 7: Pipeline Bulk Cache
 
 ```bash
-# Dung redis-cli pipeline mode
-# Tao file commands.txt:
+# Dùng redis-cli pipeline mode
+# Tạo file commands.txt:
 SET cache:employee:1 '{"id":1,"name":"Emp 1"}' EX 600
 SET cache:employee:2 '{"id":2,"name":"Emp 2"}' EX 600
 SET cache:employee:3 '{"id":3,"name":"Emp 3"}' EX 600
@@ -892,10 +892,10 @@ GET cache:employee:1
 GET cache:employee:2
 GET cache:employee:3
 
-# Chay pipeline
+# Chạy pipeline
 cat commands.txt | docker exec -i redis-lab redis-cli --pipe
 
-# Hoac trong redis-cli, dung MULTI/EXEC de minh hoa
+# Hoặc trong redis-cli, dùng MULTI/EXEC để minh họa
 MULTI
 GET cache:employee:1
 GET cache:employee:2
@@ -907,26 +907,26 @@ EXEC
 
 ## 10. Checklist Day 2
 
-### Kien thuc
+### Kiến thức
 
-- [ ] Giai thich Bitmap dung cho boolean flag, va khi nao chon Bitmap vs Set
-- [ ] Giai thich HyperLogLog la approximate unique count, khong lay duoc danh sach
-- [ ] Giai thich Pub/Sub mat message khi consumer offline — tai sao
-- [ ] So sanh Streams vs Pub/Sub: ack, consumer group, replay
-- [ ] Giai thich MULTI/EXEC khac SQL transaction the nao (khong co rollback logic)
-- [ ] Giai thich WATCH la optimistic locking
-- [ ] Giai thich Lua atomic hon Pipeline
-- [ ] Giai thich Pipeline chi giam RTT, khong atomic
-- [ ] Neu duoc 3 persistence mode va khi nao dung moi mode
+- [ ] Giải thích Bitmap dùng cho boolean flag, và khi nào chọn Bitmap vs Set
+- [ ] Giải thích HyperLogLog là approximate unique count, không lấy được danh sách
+- [ ] Giải thích Pub/Sub mất message khi consumer offline — tại sao
+- [ ] So sánh Streams vs Pub/Sub: ack, consumer group, replay
+- [ ] Giải thích MULTI/EXEC khác SQL transaction thế nào (không có rollback logic)
+- [ ] Giải thích WATCH là optimistic locking
+- [ ] Giải thích Lua atomic hơn Pipeline
+- [ ] Giải thích Pipeline chỉ giảm RTT, không atomic
+- [ ] Nêu được 3 persistence mode và khi nào dùng mỗi mode
 
-### Thuc hanh
+### Thực hành
 
 - [ ] SETBIT/GETBIT/BITCOUNT cho attendance flag
-- [ ] BITOP AND cho intersection 2 ngay
+- [ ] BITOP AND cho intersection 2 ngày
 - [ ] PFADD/PFCOUNT/PFMERGE cho HyperLogLog
-- [ ] Subscribe va publish trong 2 terminal rieng
+- [ ] Subscribe và publish trong 2 terminal riêng
 - [ ] XADD/XGROUP/XREADGROUP/XACK
-- [ ] MULTI/EXEC voi check-in counter
+- [ ] MULTI/EXEC với check-in counter
 - [ ] WATCH pattern
 - [ ] Lua release lock
 - [ ] Pipeline bulk get/set
@@ -935,50 +935,50 @@ EXEC
 
 ## 11. Production Pitfalls Day 2
 
-### P1: Pub/Sub Consumer Gap → Mat Message
+### P1: Pub/Sub Consumer Gap → Mất Message
 
 ```
-T1: Subscriber dang chay, nhan message OK
-T2: Subscriber restart (deploy moi, crash)
-T3: Publisher gui 50 messages
-T4: Subscriber chay lai — 50 messages da mat
+T1: Subscriber đang chạy, nhận message OK
+T2: Subscriber restart (deploy mới, crash)
+T3: Publisher gửi 50 messages
+T4: Subscriber chạy lại — 50 messages đã mất
 ```
 
-**Giai phap**: Dung Streams voi consumer group. XREADGROUP + XACK dam bao delivery.
+**Giải pháp**: Dùng Streams với consumer group. XREADGROUP + XACK đảm bảo delivery.
 
 ---
 
-### P2: MULTI/EXEC Khong Co Rollback
+### P2: MULTI/EXEC Không Có Rollback
 
 ```bash
 MULTI
-INCR budget:department:10    # Giam budget
-INCR purchase:order:500      # Tang don hang
+INCR budget:department:10    # Giảm budget
+INCR purchase:order:500      # Tăng đơn hàng
 EXEC
 ```
 
-Neu command thu 2 loi runtime (sai type), command thu 1 da chay. Khong co rollback.
+Nếu command thứ 2 lỗi runtime (sai type), command thứ 1 đã chạy. Không có rollback.
 
-**Giai phap**: Voi logic phuc tap can rollback → dung Lua (co the tra ve error, goi pcode xu ly), hoac don gian hoa business logic.
+**Giải pháp**: Với logic phức tạp cần rollback → dùng Lua (có thể trả về error, gọi pcode xử lý), hoặc đơn giản hóa business logic.
 
 ---
 
-### P3: Lua Script Dai Block Event Loop
+### P3: Lua Script Dài Block Event Loop
 
 ```lua
--- Lua script voi loop lon → NGUY HIEM
+-- Lua script với loop lớn → NGUY HIỂM
 for i=1,100000 do
   redis.call('INCR', 'counter:'..i)
 end
 ```
 
-Redis block trong thoi gian nay. Tat ca client khac phai doi.
+Redis block trong thời gian này. Tất cả client khác phải đợi.
 
-**Giai phap**: Giu Lua script ngan (< 1ms). Neu can xu ly nhieu → chia nho, hoac xu ly o application layer.
+**Giải pháp**: Giữ Lua script ngắn (< 1ms). Nếu cần xử lý nhiều → chia nhỏ, hoặc xử lý ở application layer.
 
 ---
 
-### P4: Pipeline Qua Lon
+### P4: Pipeline Quá Lớn
 
 ```typescript
 // BAD: Pipeline 100,000 commands
@@ -986,67 +986,67 @@ const pipeline = redis.pipeline();
 for (let i = 0; i < 100000; i++) {
   pipeline.set(`key:${i}`, 'value');
 }
-await pipeline.exec();   // Memory spike o ca client va server
+await pipeline.exec();   // Memory spike ở cả client và server
 ```
 
-**Giai phap**: Chunk pipeline theo batch 200-500 commands.
+**Giải pháp**: Chunk pipeline theo batch 200-500 commands.
 
 ---
 
-### P5: Streams Pending List Phong To
+### P5: Streams Pending List Phình To
 
-Neu consumer khong XACK, pending list tang vo han.
+Nếu consumer không XACK, pending list tăng vô hạn.
 
 ```bash
-# Kiem tra pending entries
+# Kiểm tra pending entries
 XPENDING stream:attendance-events workers - + 100
 XLEN stream:attendance-events
 
-# Monitor XPENDING dinh ky
+# Monitor XPENDING định kỳ
 ```
 
-**Giai phap**: Monitor pending list trong alert system. Implement XCLAIM/XAUTOCLAIM cho message bi stale.
+**Giải pháp**: Monitor pending list trong alert system. Implement XCLAIM/XAUTOCLAIM cho message bị stale.
 
 ---
 
 ### P6: Bitmap Dense vs Sparse
 
 ```bash
-# BAD: ID gap → ton memory
+# BAD: ID gap → tốn memory
 SETBIT attendance:2026-07-08 1000000 1    # Allocate 125KB cho 1 bit
 SETBIT attendance:2026-07-08 5000000 1    # Allocate 625KB
 
-# GOOD: Map ID thanh sequential index neu ID khong dense
-# employee_offset = employee_id % max_employees hoac dung map
+# GOOD: Map ID thành sequential index nếu ID không dense
+# employee_offset = employee_id % max_employees hoặc dùng map
 ```
 
 ---
 
 ## 12. Senior Review Questions Day 2
 
-**Q1**: Khi nao chon Bitmap va khi nao chon Set de track daily attendance?
+**Q1**: Khi nào chọn Bitmap và khi nào chọn Set để track daily attendance?
 
-> **Answer**: Bitmap tot khi employee ID la integer, so luong lon (>10k), can tiet kiem memory, va can BITOP (AND/OR) de tinh intersection/union giua cac ngay. Set tot khi ID la string, so luong nho, hoac can lay danh sach ai da check-in (SMEMBERS). Caution: Bitmap voi ID lon hoac sparse lam mat loi the memory.
+> **Answer**: Bitmap tốt khi employee ID là integer, số lượng lớn (>10k), cần tiết kiệm memory, và cần BITOP (AND/OR) để tính intersection/union giữa các ngày. Set tốt khi ID là string, số lượng nhỏ, hoặc cần lấy danh sách ai đã check-in (SMEMBERS). Caution: Bitmap với ID lớn hoặc sparse làm mất lợi thế memory.
 
-**Q2**: Ban can dem unique employees da mo dashboard trong thang. Dung HLL hay Set?
+**Q2**: Bạn cần đếm unique employees đã mở dashboard trong tháng. Dùng HLL hay Set?
 
-> **Answer**: HLL neu scale lon (>100k unique) va chi can count, khong can biet danh sach ai. Set neu can exact count, can biet cu the ai, hoac scale nho (< 10k unique). Voi timekeeping 2000 employee, Set la du — khong dang cau phuc tap HLL.
+> **Answer**: HLL nếu scale lớn (>100k unique) và chỉ cần count, không cần biết danh sách ai. Set nếu cần exact count, cần biết cụ thể ai, hoặc scale nhỏ (< 10k unique). Với timekeeping 2000 employee, Set là đủ — không đáng cầu phức tạp HLL.
 
-**Q3**: Tai sao Pub/Sub khong phu hop cho attendance event processing?
+**Q3**: Tại sao Pub/Sub không phù hợp cho attendance event processing?
 
-> **Answer**: Consumer offline → mat message (khong buffer). Khong co ack → khong biet consumer xu ly thanh cong chua. Khong co retry khi consumer fail. Khong co consumer group de scale. Dung Streams voi XREADGROUP + XACK. Pub/Sub chi dung cho notification nhe (realtime dashboard update) co the mat duoc.
+> **Answer**: Consumer offline → mất message (không buffer). Không có ack → không biết consumer xử lý thành công chưa. Không có retry khi consumer fail. Không có consumer group để scale. Dùng Streams với XREADGROUP + XACK. Pub/Sub chỉ dùng cho notification nhẹ (realtime dashboard update) có thể mất được.
 
-**Q4**: Mo ta WATCH va ung dung cu the trong timekeeping.
+**Q4**: Mô tả WATCH và ứng dụng cụ thể trong timekeeping.
 
-> **Answer**: WATCH implement optimistic locking — neu key bi thay doi sau WATCH va truoc EXEC, EXEC tra ve nil (abort). Ung dung: decrement OTP quota cua employee. WATCH quota:emp:100, GET current value, MULTI + DECR + EXEC. Neu employee dung 2 device cung luc, mot trong hai request se fail va phai retry. An toan hon Lua cho use case don gian.
+> **Answer**: WATCH implement optimistic locking — nếu key bị thay đổi sau WATCH và trước EXEC, EXEC trả về nil (abort). Ứng dụng: decrement OTP quota của employee. WATCH quota:emp:100, GET current value, MULTI + DECR + EXEC. Nếu employee dùng 2 device cùng lúc, một trong hai request sẽ fail và phải retry. An toàn hơn Lua cho use case đơn giản.
 
-**Q5**: Giai thich Pipeline vs MULTI/EXEC vs Lua cho batch cache set.
+**Q5**: Giải thích Pipeline vs MULTI/EXEC vs Lua cho batch cache set.
 
-> **Answer**: Pipeline: Gui tat ca SET cung luc, 1 RTT thay vi N RTT. Khong atomic — OK cho batch cache set vi tung cache entry la doc lap. MULTI/EXEC: Atomic nhom SET, nhung overhead cua MULTI/EXEC khong can thiet cho cache set doc lap. Lua: Atomic voi logic phuc tap. Over-engineering cho simple batch set. Ket luan: Dung Pipeline cho batch cache operations thong thuong.
+> **Answer**: Pipeline: Gửi tất cả SET cùng lúc, 1 RTT thay vì N RTT. Không atomic — OK cho batch cache set vì từng cache entry là độc lập. MULTI/EXEC: Atomic nhóm SET, nhưng overhead của MULTI/EXEC không cần thiết cho cache set độc lập. Lua: Atomic với logic phức tạp. Over-engineering cho simple batch set. Kết luận: Dùng Pipeline cho batch cache operations thông thường.
 
-**Q6**: Streams consumer group — dieu gi xay ra khi worker-1 crash sau khi XREADGROUP nhung truoc XACK?
+**Q6**: Streams consumer group — điều gì xảy ra khi worker-1 crash sau khi XREADGROUP nhưng trước XACK?
 
-> **Answer**: Message nam trong pending list, XPENDING cho thay worker-1 dang giu message do. Nếu co heartbeat/monitor, worker-2 co the XCLAIM message sau timeout (vd: 30s). Hoac XAUTOCLAIM tu dong claim. Neu khong co, message bi stuck → implement monitor va auto-claim la mandatory trong production.
+> **Answer**: Message nằm trong pending list, XPENDING cho thấy worker-1 đang giữ message đó. Nếu có heartbeat/monitor, worker-2 có thể XCLAIM message sau timeout (vd: 30s). Hoặc XAUTOCLAIM tự động claim. Nếu không có, message bị stuck → implement monitor và auto-claim là mandatory trong production.
 
 ---
 
@@ -1065,7 +1065,7 @@ BITOP AND|OR|XOR|NOT destkey key [key ...]
 ### HyperLogLog
 
 ```bash
-PFADD key element [element ...]    # Return 1 neu HLL changed, 0 neu khong
+PFADD key element [element ...]    # Return 1 nếu HLL changed, 0 nếu không
 PFCOUNT key [key ...]              # Approximate unique count
 PFMERGE destkey sourcekey [sourcekey ...]
 ```
@@ -1125,4 +1125,4 @@ SCRIPT FLUSH [ASYNC|SYNC]
 
 ---
 
-*Day 2 hoan thanh. Next: Day 3 — Redis Cluster, Sentinel & High Availability.*
+*Day 2 hoàn thành. Next: Day 3 — Redis Cluster, Sentinel & High Availability.*

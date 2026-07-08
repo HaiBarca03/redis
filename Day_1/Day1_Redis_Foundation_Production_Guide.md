@@ -41,22 +41,22 @@ Redis Big Key
 
 ---
 
-## 1. Ly Thuyet Cot Loi
+## 1. Lý Thuyết Cốt Lõi
 
-### 1.1 Redis La Gi?
+### 1.1 Redis Là Gì?
 
 Redis = **RE**mote **DI**ctionary **S**erver.
 
-No la **in-memory data structure store** — khong phai "database nhanh". Toan bo data song trong RAM, khong can parse qua disk I/O.
+Nó là **in-memory data structure store** — không phải "database nhanh". Toàn bộ data sống trong RAM, không cần parse qua disk I/O.
 
-Redis phuc vu cac use case:
+Redis phục vụ các use case:
 
-| Use Case | Ly do dung Redis |
+| Use Case | Lý do dùng Redis |
 |---|---|
-| Cache | Tranh doc DB lap lai |
-| Session store | Fast read, TTL tu xoa |
-| OTP / token | TTL tu expire |
-| Rate limiter | INCR atomic, khong race condition |
+| Cache | Tránh đọc DB lặp lại |
+| Session store | Fast read, TTL tự xóa |
+| OTP / token | TTL tự expire |
+| Rate limiter | INCR atomic, không race condition |
 | Distributed lock | SET NX + EX, atomic |
 | Leaderboard | Sorted Set rank by score |
 | Counter | INCR/DECR atomic |
@@ -64,48 +64,48 @@ Redis phuc vu cac use case:
 | Online users | Set |
 | Delayed job | Sorted Set + score = timestamp |
 
-> **Rule quan trong**: Redis **bo sung** PostgreSQL, khong **thay the**.
+> **Rule quan trọng**: Redis **bổ sung** PostgreSQL, không **thay thế**.
 
 ---
 
 ### 1.2 Redis vs SQL Database
 
-| Tieu chi | PostgreSQL/MySQL | Redis |
+| Tiêu chí | PostgreSQL/MySQL | Redis |
 |---|---|---|
-| Vi tri trong stack | Source of truth | Cache / Coordination layer |
-| Query | SQL phuc tap, JOIN | Lookup theo key |
-| Transaction | ACID day du | Atomic command, MULTI/EXEC gioi han |
+| Vị trí trong stack | Source of truth | Cache / Coordination layer |
+| Query | SQL phức tạp, JOIN | Lookup theo key |
+| Transaction | ACID đầy đủ | Atomic command, MULTI/EXEC giới hạn |
 | Data model | Schema, relation | Key-value, data structures |
 | Persistence | Durable, WAL | RAM first, persistence optional |
-| Scale | Vertical + horizontal (phuc tap) | Horizontal cluster duoc |
+| Scale | Vertical + horizontal (phức tạp) | Horizontal cluster được |
 | Latency | ms-tens of ms | sub-ms |
-| Memory | Disk unlimited | RAM co gioi han |
+| Memory | Disk unlimited | RAM có giới hạn |
 
-**Cau ghi nho**:
-> PostgreSQL giu **tinh dung lau dai**.
-> Redis giu **toc do, trang thai tam, coordination nhe**.
+**Câu ghi nhớ**:
+> PostgreSQL giữ **tính đúng lâu dài**.
+> Redis giữ **tốc độ, trạng thái tạm, coordination nhẹ**.
 
-Timekeeping system: PostgreSQL luu attendance record chinh thuc. Redis luu trang thai "employee dang online", "counter check-in hom nay", lock chong duplicate check-in.
+Timekeeping system: PostgreSQL lưu attendance record chính thức. Redis lưu trạng thái "employee đang online", "counter check-in hôm nay", lock chống duplicate check-in.
 
 ---
 
-### 1.3 In-Memory — Tradeoffs That Su
+### 1.3 In-Memory — Tradeoffs Thật Sự
 
-**Uu diem:**
-- Latency sub-millisecond (so voi DB: 5-50ms)
-- Throughput cuc cao (100k+ ops/sec single instance)
-- Data structure phong phu san co
+**Ưu điểm:**
+- Latency sub-millisecond (so với DB: 5-50ms)
+- Throughput cực cao (100k+ ops/sec single instance)
+- Data structure phong phú sẵn có
 
-**Nhuoc diem (phai nho ky cho production):**
+**Nhược điểm (phải nhớ kỹ cho production):**
 
-| Van de | Hau qua | Giai phap |
+| Vấn đề | Hậu quả | Giải pháp |
 |---|---|---|
-| RAM dat | Khong the luu tat ca data | Chi cache hot data, dung TTL |
-| Restart mat data | Neu khong config persistence | RDB + AOF persistence |
-| Memory day | Redis tu choi write hoac evict | Eviction policy phu hop |
+| RAM đắt | Không thể lưu tất cả data | Chỉ cache hot data, dùng TTL |
+| Restart mất data | Nếu không config persistence | RDB + AOF persistence |
+| Memory đầy | Redis từ chối write hoặc evict | Eviction policy phù hợp |
 | Out of Memory | Redis crash | Monitor memory, set `maxmemory` |
 
-**Eviction policy can biet:**
+**Eviction policy cần biết:**
 
 ```
 noeviction       Từ chối write khi đầy. Nguy hiểm cho cache layer
@@ -119,7 +119,7 @@ allkeys-random   Xóa random. Tránh dùng
 
 ---
 
-### 1.4 Single-Threaded — Y Nghia Thuc Te
+### 1.4 Single-Threaded — Ý Nghĩa Thực Tế
 
 Redis xử lý command qua **một main execution thread** duy nhất.
 
@@ -133,31 +133,31 @@ Kết quả luôn đúng vì Redis xử lý tuần tự. Không bao giờ bị r
 **Hệ quả trong production:**
 
 ```
-OK  INCR, DECR    Atomic, an toan
-OK  SET NX EX     Atomic lock, khong race
+OK  INCR, DECR    Atomic, an toàn
+OK  SET NX EX     Atomic lock, không race
 OK  ZADD, LPUSH   Atomic
-NO  KEYS *        Scan toan bo keyspace, block tat ca client khac
-NO  Lua script dai  Block event loop
-NO  HGETALL tren hash 10k field  Block
+NO  KEYS *        Scan toàn bộ keyspace, block tất cả client khác
+NO  Lua script dài  Block event loop
+NO  HGETALL trên hash 10k field  Block
 ```
 
 > **Rule**: Không bao giờ dùng `KEYS *` trong production. Thay bằng `SCAN`.
 
 ```bash
-# BAD - block toan bo trong luc scan
+# BAD - block toàn bộ trong lúc scan
 KEYS cache:employee:*
 
-# GOOD - scan theo batch, khong block
+# GOOD - scan theo batch, không block
 SCAN 0 MATCH cache:employee:* COUNT 100
 ```
 
-**Luu y**: Redis 6.0+ có I/O threads xử lý network, nhưng logic xử lý command vẫn single-threaded. Khi nói "single-threaded" = main command processing thread.
+**Lưu ý**: Redis 6.0+ có I/O threads xử lý network, nhưng logic xử lý command vẫn single-threaded. Khi nói "single-threaded" = main command processing thread.
 
 ---
 
 ### 1.5 Key Naming Convention
 
-**Pattern chuan**: `{namespace}:{entity}:{identifier}`
+**Pattern chuẩn**: `{namespace}:{entity}:{identifier}`
 
 ```bash
 # Cache
@@ -189,14 +189,14 @@ online:employees
 leaderboard:early-checkin:{date}
 ```
 
-**Rules quan trong:**
+**Rules quan trọng:**
 
-| Rule | Vi du sai | Vi du dung |
+| Rule | Ví dụ sai | Ví dụ đúng |
 |---|---|---|
-| Co namespace | `employee:100` | `cache:employee:100` |
+| Có namespace | `employee:100` | `cache:employee:100` |
 | Readable | `e:100:d` | `cache:employee:100` |
-| Cache/temp co TTL | `session:abc` khong TTL | `session:abc EX 3600` |
-| Khong dung ten chung chung | `data`, `temp`, `user` | `cache:employee:100` |
+| Cache/temp có TTL | `session:abc` không TTL | `session:abc EX 3600` |
+| Không dùng tên chung chung | `data`, `temp`, `user` | `cache:employee:100` |
 | Entity + identifier | `employee` | `cache:employee:{id}` |
 
 **Hot key problem**: Nếu hàng nghìn request cùng đọc `cache:employee:1` (giám đốc), đây là hot key. Giải pháp: key sharding `cache:employee:1:shard:{0-9}`.
@@ -206,47 +206,47 @@ leaderboard:early-checkin:{date}
 ### 1.6 TTL / Expiration
 
 ```bash
-# Set key voi TTL
+# Set key với TTL
 SET cache:employee:100 '{"id":100}' EX 300    # 300 seconds
 SET otp:phone:0901234567 "123456" PX 120000   # 120000 milliseconds
 
-# Set TTL sau khi key da ton tai
+# Set TTL sau khi key đã tồn tại
 EXPIRE cache:employee:100 300                  # seconds
 PEXPIRE cache:employee:100 300000              # milliseconds
 
-# Kiem tra TTL
-TTL cache:employee:100    # 297 (con 297 giay)
-TTL cache:employee:100    # -1  (khong co expire)
-TTL cache:employee:999    # -2  (key khong ton tai)
+# Kiểm tra TTL
+TTL cache:employee:100    # 297 (còn 297 giây)
+TTL cache:employee:100    # -1  (không có expire)
+TTL cache:employee:999    # -2  (key không tồn tại)
 
-# Xoa expire
+# Xóa expire
 PERSIST cache:employee:100
 ```
 
-**Bang TTL can nho cho timekeeping:**
+**Bảng TTL cần nhớ cho timekeeping:**
 
-| Key | TTL | Ly do |
+| Key | TTL | Lý do |
 |---|---|---|
-| `cache:employee:{id}` | 5-15 phut | Profile thay doi it |
-| `cache:shift:{id}` | 30-60 phut | Shift config it thay doi |
-| `session:{token}` | 1-8 gio | Session expire |
-| `otp:phone:{phone}` | 2-5 phut | OTP ngan |
-| `otp:attempt:{phone}` | 15-60 phut | Rate limit window |
-| `rate:login:{id}` | 15-60 phut | Sliding/fixed window |
-| `lock:checkin:{id}:{date}` | 10-30 giay | Lock ngan, tu giai phong |
-| `stats:checkin:{date}` | 25 gio | Het ngay + buffer |
-| `leaderboard:early-checkin:{date}` | 25 gio | Leaderboard hang ngay |
-| `online:employees` | Khong TTL | Managed manually |
+| `cache:employee:{id}` | 5-15 phút | Profile thay đổi ít |
+| `cache:shift:{id}` | 30-60 phút | Shift config ít thay đổi |
+| `session:{token}` | 1-8 giờ | Session expire |
+| `otp:phone:{phone}` | 2-5 phút | OTP ngắn |
+| `otp:attempt:{phone}` | 15-60 phút | Rate limit window |
+| `rate:login:{id}` | 15-60 phút | Sliding/fixed window |
+| `lock:checkin:{id}:{date}` | 10-30 giây | Lock ngắn, tự giải phóng |
+| `stats:checkin:{date}` | 25 giờ | Hết ngày + buffer |
+| `leaderboard:early-checkin:{date}` | 25 giờ | Leaderboard hằng ngày |
+| `online:employees` | Không TTL | Managed manually |
 
 ---
 
-## 2. Data Types — Chi Tiet Production
+## 2. Data Types — Chi Tiết Production
 
 ### 2.1 String
 
-**La gi**: Bytes, toi da 512MB. Binary-safe byte sequence.
+**Là gì**: Bytes, tối đa 512MB. Binary-safe byte sequence.
 
-**Dung khi**:
+**Dùng khi**:
 - Cache JSON object (serialize)
 - Counter (INCR/DECR)
 - Flag/boolean
@@ -263,139 +263,139 @@ MGET cache:employee:100 cache:employee:101 cache:employee:102
 
 # Atomic counter
 INCR stats:checkin:2026-07-08        # 1, 2, 3, ...
-INCRBY stats:checkin:2026-07-08 5    # Tang 5
-DECR quota:otp:100                   # Giam 1
+INCRBY stats:checkin:2026-07-08 5    # Tăng 5
+DECR quota:otp:100                   # Giảm 1
 
-# One-time token: lay va xoa ngay
+# One-time token: lấy và xóa ngay
 GETDEL session:one-time-abc
 ```
 
-**Pattern — Rate limiter (chu y pitfall):**
+**Pattern — Rate limiter (chú ý pitfall):**
 
 ```bash
 INCR rate:login:100
 EXPIRE rate:login:100 900
-# CAUTION: 2 lenh nay KHONG atomic -> dung Lua neu can chinh xac
+# CAUTION: 2 lệnh này KHÔNG atomic -> dùng Lua nếu cần chính xác
 ```
 
 **Production pitfall**:
-- Luu JSON string OK voi cache, nhung neu hay update tung field → dung Hash
-- String luu large JSON (>100KB) → ton memory, ton network
+- Lưu JSON string OK với cache, nhưng nếu hay update từng field → dùng Hash
+- String lưu large JSON (>100KB) → tốn memory, tốn network
 
 ---
 
 ### 2.2 Hash
 
-**La gi**: Map key-value ben trong mot Redis key. Tuong tu mot row trong SQL.
+**Là gì**: Map key-value bên trong một Redis key. Tương tự một row trong SQL.
 
-**Dung khi**:
-- Object nhieu field, thuong update tung field
-- Khong can TTL rieng cho tung field
-- Tiet kiem memory neu field nho (listpack encoding)
+**Dùng khi**:
+- Object nhiều field, thường update từng field
+- Không cần TTL riêng cho từng field
+- Tiết kiệm memory nếu field nhỏ (listpack encoding)
 
 ```bash
-# Luu employee voi nhieu field
+# Lưu employee với nhiều field
 HSET employee:100 name "Nguyen Van A" department_id "10" status "active" leave_days_used "2"
 
-# Lay mot field
+# Lấy một field
 HGET employee:100 name                     # "Nguyen Van A"
 
-# Lay tat ca field
+# Lấy tất cả field
 HGETALL employee:100
 
-# Lay nhieu field cu the
+# Lấy nhiều field cụ thể
 HMGET employee:100 name department_id
 
-# Tang so nguyen trong field (atomic)
+# Tăng số nguyên trong field (atomic)
 HINCRBY employee:100 leave_days_used 1     # 3
 
-# Kiem tra field ton tai
+# Kiểm tra field tồn tại
 HEXISTS employee:100 status               # 1
 
-# Xoa field
+# Xóa field
 HDEL employee:100 temp_field
 
-# Dem so field
+# Đếm số field
 HLEN employee:100
 ```
 
 **Hash vs String (JSON):**
 
-| Tieu chi | Hash | String (JSON) |
+| Tiêu chí | Hash | String (JSON) |
 |---|---|---|
-| Update tung field thuong xuyen | Tot | Phai doc-parse-update-write lai |
-| Read toan bo object | Tot (HGETALL) | Tot (GET) |
-| TTL cho ca object | EXPIRE | EX |
-| Serialize nested object | Kho | JSON.stringify OK |
-| Memory (< 128 fields) | Toi uu listpack | Tuong duong |
+| Update từng field thường xuyên | Tốt | Phải đọc-parse-update-write lại |
+| Read toàn bộ object | Tốt (HGETALL) | Tốt (GET) |
+| TTL cho cả object | EXPIRE | EX |
+| Serialize nested object | Khó | JSON.stringify OK |
+| Memory (< 128 fields) | Tối ưu listpack | Tương đương |
 
-**Production Pitfall**: `HGETALL` tren hash voi hang nghin field → Big key, block. Giu hash < 1000 fields.
+**Production Pitfall**: `HGETALL` trên hash với hàng nghìn field → Big key, block. Giữ hash < 1000 fields.
 
 ---
 
 ### 2.3 List
 
-**La gi**: Doubly-linked list. Push/pop tu ca 2 dau O(1).
+**Là gì**: Doubly-linked list. Push/pop từ cả 2 đầu O(1).
 
-**Dung khi**:
+**Dùng khi**:
 - Simple queue (FIFO: RPUSH + LPOP)
 - Stack (LIFO: LPUSH + LPOP)
-- Recent activity / history (gioi han bang LTRIM)
+- Recent activity / history (giới hạn bằng LTRIM)
 - Blocking queue (BRPOP)
 
 ```bash
-# Queue: producer them job
+# Queue: producer thêm job
 RPUSH queue:emails "job:email:100"
 RPUSH queue:emails "job:email:101"
 
-# Queue: consumer lay theo FIFO
+# Queue: consumer lấy theo FIFO
 LPOP queue:emails             # "job:email:100"
 
-# Blocking pop: wait toi da 5 giay
+# Blocking pop: wait tối đa 5 giây
 BRPOP queue:emails 5
 
-# Recent activity: giu 20 hoat dong gan nhat
+# Recent activity: giữ 20 hoạt động gần nhất
 LPUSH activity:employee:100 "checkin:2026-07-08T08:00:00"
 LTRIM activity:employee:100 0 19
 
 # Xem list
-LRANGE activity:employee:100 0 -1   # Tat ca
-LRANGE activity:employee:100 0 4    # 5 gan nhat
+LRANGE activity:employee:100 0 -1   # Tất cả
+LRANGE activity:employee:100 0 4    # 5 gần nhất
 LLEN activity:employee:100
 ```
 
 **Production Pitfall**:
-- List khong dedup — cung item co the push nhieu lan
-- LRANGE 0 -1 tren list lon → Big key, block
-- **Redis List khong phai production-grade message queue** — khong co ack, khong retry, khong dead letter. Dung BullMQ (Redis Streams) hoac RabbitMQ/Kafka cho critical work.
+- List không dedup — cùng một item có thể push nhiều lần
+- LRANGE 0 -1 trên list lớn → Big key, block
+- **Redis List không phải production-grade message queue** — không có ack, không retry, không dead letter. Dùng BullMQ (Redis Streams) hoặc RabbitMQ/Kafka cho critical work.
 
 ---
 
 ### 2.4 Set
 
-**La gi**: Unordered collection, khong duplicate, O(1) cho add/remove/membership check.
+**Là gì**: Unordered collection, không duplicate, O(1) cho add/remove/membership check.
 
-**Dung khi**:
+**Dùng khi**:
 - Unique collection
-- Membership check (ai dang online?)
+- Membership check (ai đang online?)
 - Deduplication
 - Tag / permission
 
 ```bash
-# Track employee dang online
+# Track employee đang online
 SADD online:employees 100 101 102 103
 
-# Kiem tra co online khong
-SISMEMBER online:employees 100    # 1 (co)
-SISMEMBER online:employees 999    # 0 (khong co)
+# Kiểm tra có online không
+SISMEMBER online:employees 100    # 1 (có)
+SISMEMBER online:employees 999    # 0 (không có)
 
-# Xoa khoi set
+# Xóa khỏi set
 SREM online:employees 100
 
-# Dem so luong
+# Đếm số lượng
 SCARD online:employees            # 3
 
-# Lay tat ca (chi dung khi set nho)
+# Lấy tất cả (chỉ dùng khi set nhỏ)
 SMEMBERS online:employees         # O(N)
 
 # Set operations
@@ -405,39 +405,39 @@ SDIFF all:employees online:employees     # Difference (ai offline)
 ```
 
 **Production Pitfall**:
-- `SMEMBERS` tren set lon → block. Dung `SSCAN`.
-- Set khong luu duoc metadata (join time, score). Neu can → Sorted Set.
+- `SMEMBERS` trên set lớn → block. Dùng `SSCAN`.
+- Set không lưu được metadata (join time, score). Nếu cần → Sorted Set.
 
 ---
 
 ### 2.5 Sorted Set (ZSet)
 
-**La gi**: Set voi moi member kem mot `score` (float). Luon sorted by score tu dong.
+**Là gì**: Set với mỗi member kèm một `score` (float). Luôn sorted by score tự động.
 
-**Dung khi**:
+**Dùng khi**:
 - Leaderboard / ranking
 - Priority queue
 - Delayed job (score = unix timestamp)
 - Time-ordered data
-- Rate limit voi sliding window chinh xac
+- Rate limit với sliding window chính xác
 
 ```bash
-# Leaderboard: check-in som hom nay
-# Score = unix timestamp (thap hon = som hon)
+# Leaderboard: check-in sớm hôm nay
+# Score = unix timestamp (thấp hơn = sớm hơn)
 ZADD leaderboard:early-checkin:2026-07-08 1751940000 "employee:100"   # 08:00
 ZADD leaderboard:early-checkin:2026-07-08 1751939700 "employee:101"   # 07:55
 ZADD leaderboard:early-checkin:2026-07-08 1751940600 "employee:102"   # 08:10
 
-# Top 10 check-in som nhat
+# Top 10 check-in sớm nhất
 ZRANGE leaderboard:early-checkin:2026-07-08 0 9 WITHSCORES
 
-# Top 10 check-in muon nhat (reverse)
+# Top 10 check-in muộn nhất (reverse)
 ZREVRANGE leaderboard:early-checkin:2026-07-08 0 9 WITHSCORES
 
-# Rank cua employee (0-indexed, 0 = som nhat)
-ZRANK leaderboard:early-checkin:2026-07-08 "employee:101"    # 0 (dung dau)
+# Rank của employee (0-indexed, 0 = sớm nhất)
+ZRANK leaderboard:early-checkin:2026-07-08 "employee:101"    # 0 (đứng đầu)
 
-# Score cua mot employee
+# Score của một employee
 ZSCORE leaderboard:early-checkin:2026-07-08 "employee:100"
 
 ZCARD leaderboard:early-checkin:2026-07-08
@@ -446,32 +446,32 @@ ZREM leaderboard:early-checkin:2026-07-08 "employee:100"
 # Delayed Job Queue
 ZADD delayed:jobs 1751944200 "send-report:2026-07-08"
 ZRANGEBYSCORE delayed:jobs 0 1751944200 LIMIT 0 10
-# Sau khi xu ly: ZREM delayed:jobs "send-report:2026-07-08"
+# Sau khi xử lý: ZREM delayed:jobs "send-report:2026-07-08"
 
 # Sliding Window Rate Limit
 ZADD rate:api:100 1751940000000 "req:abc"
-ZREMRANGEBYSCORE rate:api:100 0 1751939940000   # xoa request ngoai window 60s
-ZCARD rate:api:100                              # dem request trong window
+ZREMRANGEBYSCORE rate:api:100 0 1751939940000   # xóa request ngoài window 60s
+ZCARD rate:api:100                              # đếm request trong window
 ```
 
 **Production Pitfall**:
-- `ZRANGE` / `ZREVRANGE` deprecated tu Redis 6.2. Dung `ZRANGE ... REV` hoac `ZRANGE ... BYSCORE`.
-- Sorted Set khong nen co > 100k members.
+- `ZRANGE` / `ZREVRANGE` deprecated từ Redis 6.2. Dùng `ZRANGE ... REV` hoặc `ZRANGE ... BYSCORE`.
+- Sorted Set không nên có > 100k members.
 
 ---
 
-## 3. Patterns Tong Hop
+## 3. Patterns Tổng Hợp
 
-### 3.1 Distributed Lock (Chong Duplicate Check-in)
+### 3.1 Distributed Lock (Chống Duplicate Check-in)
 
 ```bash
-# SET NX EX: atomic "set neu khong ton tai"
+# SET NX EX: atomic "set nếu không tồn tại"
 SET lock:checkin:100:2026-07-08 "unique-uuid-of-process-a" NX EX 10
-# "OK" neu lock thanh cong
-# nil neu lock dang bi giu
+# "OK" nếu lock thành công
+# nil nếu lock đang bị giữ
 ```
 
-**Release lock dung cach** — PHAI verify value truoc khi DEL:
+**Release lock đúng cách** — PHẢI verify value trước khi DEL:
 
 ```lua
 -- Lua script atomic (check-and-delete)
@@ -482,11 +482,11 @@ else
 end
 ```
 
-**Ly do can unique value**: Process A set lock, timeout, lock expire, Process B set lock moi. Neu A DEL khong kiem tra value → xoa nham lock cua B.
+**Lý do cần unique value**: Process A set lock, timeout, lock expire, Process B set lock mới. Nếu A DEL không kiểm tra value → xóa nhầm lock của B.
 
 ---
 
-### 3.2 Cache-Aside Pattern voi TTL Jitter
+### 3.2 Cache-Aside Pattern với TTL Jitter
 
 ```typescript
 // NestJS service example
@@ -498,7 +498,7 @@ async getEmployee(id: number): Promise<Employee> {
 
   const employee = await this.employeeRepo.findOne({ where: { id } });
   if (employee) {
-    // TTL jitter: tranh cache stampede
+    // TTL jitter: tránh cache stampede
     const ttl = 600 + Math.floor(Math.random() * 60);
     await this.redis.set(cacheKey, JSON.stringify(employee), 'EX', ttl);
   }
@@ -508,7 +508,7 @@ async getEmployee(id: number): Promise<Employee> {
 
 ---
 
-### 3.3 Rate Limiter — Atomic voi Lua
+### 3.3 Rate Limiter — Atomic với Lua
 
 ```lua
 -- Lua script atomic
@@ -526,22 +526,22 @@ end
 ### 3.4 DEL vs UNLINK
 
 ```bash
-DEL cache:employee:100     # Synchronous: block event loop cho den khi xoa xong
-UNLINK cache:employee:100  # Async: tra loi ngay, xoa o background thread
+DEL cache:employee:100     # Synchronous: block event loop cho đến khi xóa xong
+UNLINK cache:employee:100  # Async: trả lời ngay, xóa ở background thread
 ```
 
-**Rule production**: Luon dung `UNLINK`. Dac biet quan trong voi big key.
+**Rule production**: Luôn dùng `UNLINK`. Đặc biệt quan trọng với big key.
 
 ---
 
-## 4. Bai Tap Day 1
+## 4. Bài Tập Day 1
 
-### Bai 1: Thiet ke Key Schema
+### Bài 1: Thiết kế Key Schema
 
-| Use Case | Key | Data Type | TTL | Ly do |
+| Use Case | Key | Data Type | TTL | Lý do |
 |---|---|---|---|---|
-| Employee profile cache | `cache:employee:{id}` | String (JSON) | 600s | It thay doi |
-| Shift config cache | `cache:shift:{id}` | String (JSON) | 1800s | Rat it thay doi |
+| Employee profile cache | `cache:employee:{id}` | String (JSON) | 600s | Ít thay đổi |
+| Shift config cache | `cache:shift:{id}` | String (JSON) | 1800s | Rất ít thay đổi |
 | Attendance summary | `cache:attendance:{emp_id}:{date}` | String (JSON) | 300s | Daily, stale ok |
 | Online employees | `online:employees` | Set | No TTL | Managed manually |
 | Daily check-in counter | `stats:checkin:{date}` | String (counter) | 25h | Daily reset |
@@ -552,20 +552,20 @@ UNLINK cache:employee:100  # Async: tra loi ngay, xoa o background thread
 | Duplicate check-in lock | `lock:checkin:{emp_id}:{date}` | String | 10s | Short lock |
 | Recent activity | `activity:employee:{id}` | List | 7d | History |
 
-### Bai 2: Commands Practice (khong nhin tai lieu)
+### Bài 2: Commands Practice (không nhìn tài liệu)
 
-1. Cache employee 100 voi TTL 10 phut
-2. Doc employee 100 tu cache
-3. Doc dong thoi employee 100, 101, 102
-4. Tang counter check-in hom nay (date: 2026-07-08)
-5. Set OTP `456789` cho phone `0901234567` expire 2 phut
-6. Set employee 200 vao Hash voi field: name, department_id, status
-7. Tang leave_days_used cua employee 200 them 1
-8. Them employee 100 vao `online:employees`
-9. Kiem tra employee 999 co online khong
-10. Add leaderboard hom nay: employee 100 check-in luc 08:05 (unix: 1751940300)
-11. Lay top 5 check-in som nhat hom nay
-12. Scan keys prefix `cache:employee:` ma khong block
+1. Cache employee 100 với TTL 10 phút
+2. Đọc employee 100 từ cache
+3. Đọc đồng thời employee 100, 101, 102
+4. Tăng counter check-in hôm nay (date: 2026-07-08)
+5. Set OTP `456789` cho phone `0901234567` expire 2 phút
+6. Set employee 200 vào Hash với field: name, department_id, status
+7. Tăng leave_days_used của employee 200 thêm 1
+8. Thêm employee 100 vào `online:employees`
+9. Kiểm tra employee 999 có online không
+10. Add leaderboard hôm nay: employee 100 check-in lúc 08:05 (unix: 1751940300)
+11. Lấy top 5 check-in sớm nhất hôm nay
+12. Scan keys prefix `cache:employee:` mà không block
 
 ---
 
@@ -574,13 +574,13 @@ UNLINK cache:employee:100  # Async: tra loi ngay, xoa o background thread
 ### Lab Setup
 
 ```bash
-# Chay Redis local voi Docker
+# Chạy Redis local với Docker
 docker run -d --name redis-lab -p 6379:6379 redis:7
 
-# Ket noi
+# Kết nối
 docker exec -it redis-lab redis-cli
 
-# Monitor real-time commands (terminal khac)
+# Monitor real-time commands (terminal khác)
 docker exec -it redis-lab redis-cli MONITOR
 ```
 
@@ -594,7 +594,7 @@ TTL cache:employee:100
 # Simulate invalidation khi employee update
 DEL cache:employee:100
 GET cache:employee:100    # nil (cache miss)
-TTL cache:employee:100    # -2 (key khong ton tai)
+TTL cache:employee:100    # -2 (key không tồn tại)
 ```
 
 ### Lab 2: Daily Check-in Counter
@@ -628,12 +628,12 @@ ZADD leaderboard:early-checkin:2026-07-08 1751941200 "employee:102"   # 08:20
 ZADD leaderboard:early-checkin:2026-07-08 1751938800 "employee:103"   # 07:40
 EXPIRE leaderboard:early-checkin:2026-07-08 90000
 
-# Top 5 som nhat
+# Top 5 sớm nhất
 ZRANGE leaderboard:early-checkin:2026-07-08 0 4 WITHSCORES
 
-# Rank (0-indexed, 0 = som nhat)
+# Rank (0-indexed, 0 = sớm nhất)
 ZRANK leaderboard:early-checkin:2026-07-08 "employee:100"     # 2
-ZRANK leaderboard:early-checkin:2026-07-08 "employee:103"     # 0 (som nhat)
+ZRANK leaderboard:early-checkin:2026-07-08 "employee:103"     # 0 (sớm nhất)
 ```
 
 ### Lab 5: Distributed Lock Simulation
@@ -643,11 +643,11 @@ ZRANK leaderboard:early-checkin:2026-07-08 "employee:103"     # 0 (som nhat)
 SET lock:checkin:100:2026-07-08 "process-a-uuid" NX EX 10
 # OK
 
-# Process B: co lock cung key
+# Process B: có lock cùng key
 SET lock:checkin:100:2026-07-08 "process-b-uuid" NX EX 10
-# nil (that bai)
+# nil (thất bại)
 
-# Process A: verify roi release
+# Process A: verify rồi release
 GET lock:checkin:100:2026-07-08    # "process-a-uuid"
 DEL lock:checkin:100:2026-07-08    # 1
 ```
@@ -655,15 +655,15 @@ DEL lock:checkin:100:2026-07-08    # 1
 ### Lab 6: KEYS vs SCAN
 
 ```bash
-# Tao 1000 keys test
+# Tạo 1000 keys test
 EVAL "for i=1,1000 do redis.call('SET', 'cache:employee:'..i, 'data', 'EX', 600) end" 0
 
 # BAD - production blocked
 KEYS cache:employee:*
 
-# GOOD - cursor-based, an toan
+# GOOD - cursor-based, an toàn
 SCAN 0 MATCH cache:employee:* COUNT 100
-# Lap voi cursor tra ve cho den khi cursor = 0
+# Lặp với cursor trả về cho đến khi cursor = 0
 
 INFO keyspace
 ```
@@ -672,24 +672,24 @@ INFO keyspace
 
 ## 6. Checklist Day 1
 
-### Kien thuc
+### Kiến thức
 
-- [ ] Giai thich Redis la gi va dung cho gi (khong doc note)
-- [ ] Neu 3 tradeoff cua in-memory
-- [ ] Giai thich single-threaded va he qua thuc te
-- [ ] Thiet ke key name cho 5 use case bat ky
-- [ ] Giai thich TTL -1 va TTL -2
-- [ ] Neu data type nao dung cho leaderboard va tai sao
-- [ ] Giai thich tai sao KEYS * bi cam
+- [ ] Giải thích Redis là gì và dùng cho gì (không đọc note)
+- [ ] Nêu 3 tradeoff của in-memory
+- [ ] Giải thích single-threaded và hệ quả thực tế
+- [ ] Thiết kế key name cho 5 use case bất kỳ
+- [ ] Giải thích TTL -1 và TTL -2
+- [ ] Nêu data type nào dùng cho leaderboard và tại sao
+- [ ] Giải thích tại sao KEYS * bị cấm
 
-### Thuc hanh
+### Thực hành
 
-- [ ] Chay Redis local bang Docker
-- [ ] CRUD voi String, Hash, List, Set, Sorted Set
-- [ ] Set va verify TTL
-- [ ] Chay SCAN thay KEYS *
-- [ ] Simulate distributed lock voi SET NX EX
-- [ ] Dung MONITOR de xem real-time commands
+- [ ] Chạy Redis local bằng Docker
+- [ ] CRUD với String, Hash, List, Set, Sorted Set
+- [ ] Set và verify TTL
+- [ ] Chạy SCAN thay KEYS *
+- [ ] Simulate distributed lock với SET NX EX
+- [ ] Dùng MONITOR để xem real-time commands
 
 ---
 
@@ -698,71 +698,71 @@ INFO keyspace
 ### P1: KEYS * trong Production
 
 ```bash
-# Tuyet doi khong dung
+# Tuyệt đối không dùng
 KEYS *
 KEYS cache:*
 
-# Luon dung SCAN
+# Luôn dùng SCAN
 SCAN 0 MATCH cache:employee:* COUNT 100
 ```
 
-**Hau qua thuc te**: KEYS * tren Redis 1 trieu key co the block 200-500ms. Tat ca request khac bi treo. Production down.
+**Hậu quả thực tế**: KEYS * trên Redis 1 triệu key có thể block 200-500ms. Tất cả request khác bị treo. Production down.
 
 ---
 
 ### P2: Big Key
 
-Big key = value rat lon, hoac collection co qua nhieu member.
+Big key = value rất lớn, hoặc collection có quá nhiều member.
 
 ```bash
 # Detect big key
 redis-cli --bigkeys
 
-# Memory cua key cu the
+# Memory của key cụ thể
 MEMORY USAGE cache:employee:100
 ```
 
 **Rule**:
-- String: < 1MB OK, > 10MB can review
+- String: < 1MB OK, > 10MB cần review
 - Hash/List/Set/ZSet: < 10,000 members OK
 
 ---
 
-### P3: Cache Key Khong Co TTL
+### P3: Cache Key Không Có TTL
 
 ```bash
 # Memory leak
 SET cache:employee:100 '{"id":100}'
 
-# Dung
+# Đúng
 SET cache:employee:100 '{"id":100}' EX 600
 ```
 
-**Hau qua**: Memory tang mai, eviction kick in, cache stale vinh vien.
+**Hậu quả**: Memory tăng mãi, eviction kick in, cache stale vĩnh viễn.
 
 ---
 
 ### P4: Cache Stampede (Thundering Herd)
 
-**Khi nao**: Cache expire dong loat cua popular key → tat ca request hit DB → DB qua tai.
+**Khi nào**: Cache expire đồng loạt của popular key → tất cả request hit DB → DB quá tải.
 
-**Giai phap**:
-- TTL jitter: `EX (base + random(0, 60))` — tranh expire dong loat
-- Probabilistic early refresh: refresh truoc khi expire
-- Lock pattern: chi 1 request rebuild cache, cac request khac dung stale hoac doi
+**Giải pháp**:
+- TTL jitter: `EX (base + random(0, 60))` — tránh expire đồng loạt
+- Probabilistic early refresh: refresh trước khi expire
+- Lock pattern: chỉ 1 request rebuild cache, các request khác dùng stale hoặc đợi
 
 ---
 
 ### P5: Race Condition trong Rate Limiter
 
 ```bash
-# INCR + EXPIRE khong atomic
+# INCR + EXPIRE không atomic
 INCR rate:login:100
 EXPIRE rate:login:100 900
-# Neu INCR thanh cong nhung process crash → key khong co TTL → memory leak
+# Nếu INCR thành công nhưng process crash → key không có TTL → memory leak
 ```
 
-**Giai phap**: Lua script atomic (xem Section 3.3).
+**Giải pháp**: Lua script atomic (xem Section 3.3).
 
 ---
 
@@ -780,10 +780,10 @@ UNLINK big-hash-100k-fields
 
 ### P7: Lock Renewal cho Long-running Job
 
-**Van de**: Job chay 30s nhung lock chi 10s → lock expire giua chung → race condition.
+**Vấn đề**: Job chạy 30s nhưng lock chỉ 10s → lock expire giữa chừng → race condition.
 
 ```typescript
-// Watchdog: renew lock moi 5s
+// Watchdog: renew lock mỗi 5s
 const renewInterval = setInterval(async () => {
   await redis.expire(`lock:checkin:${empId}:${date}`, 10);
 }, 5000);
@@ -800,39 +800,39 @@ try {
 
 ## 8. Senior Review Questions
 
-**Q1**: Ban cache employee profile bang String JSON. Team leader hoi: "Sao khong dung Hash?"
+**Q1**: Bạn cache employee profile bằng String JSON. Team leader hỏi: "Sao không dùng Hash?"
 
-> **Answer**: String tot khi read toan bo object mot lan, it update individual field. Hash tot khi thuong xuyen HINCRBY hoac HSET tung field. Profile thuong chi doc → String simpler, it overhead. Neu co field nhu `leave_days_used` can HINCRBY thuong xuyen → Hash hop ly hon. Hash khong serialize nested object tot nhu String JSON.
+> **Answer**: String tốt khi read toàn bộ object một lần, ít update individual field. Hash tốt khi thường xuyên HINCRBY hoặc HSET từng field. Profile thường chỉ đọc → String simpler, ít overhead. Nếu có field như `leave_days_used` cần HINCRBY thường xuyên → Hash hợp lý hơn. Hash không serialize nested object tốt như String JSON.
 
-**Q2**: Redis dang dung 90% memory. Ban se lam gi?
+**Q2**: Redis đang dùng 90% memory. Bạn sẽ làm gì?
 
-> **Answer**: (1) `INFO memory` xem used_memory, maxmemory, eviction_policy. (2) `redis-cli --bigkeys` tim big key. (3) SCAN + TTL kiem tra key khong co expire. (4) `SLOWLOG GET 10` xem command nang. (5) Xem xet tang maxmemory hoac scale Redis. (6) Review eviction policy co phu hop khong.
+> **Answer**: (1) `INFO memory` xem used_memory, maxmemory, eviction_policy. (2) `redis-cli --bigkeys` tìm big key. (3) SCAN + TTL kiểm tra key không có expire. (4) `SLOWLOG GET 10` xem command nặng. (5) Xem xét tăng maxmemory hoặc scale Redis. (6) Review eviction policy có phù hợp không.
 
-**Q3**: Sang ra employee bao check-in bi loi luc 8h. Redis logs thay latency spike. Ban debug the nao?
+**Q3**: Sáng ra employee báo check-in bị lỗi lúc 8h. Redis logs thấy latency spike. Bạn debug thế nào?
 
-> **Answer**: (1) `SLOWLOG GET 20` xem command cham. (2) Kiem tra co KEYS * khong. (3) `redis-cli --bigkeys`. (4) `INFO memory` — co gan maxmemory khong? (5) Kiem tra network latency. (6) `INFO stats` → `evicted_keys` xem eviction xay ra khong.
+> **Answer**: (1) `SLOWLOG GET 20` xem command chậm. (2) Kiểm tra có KEYS * không. (3) `redis-cli --bigkeys`. (4) `INFO memory` — có gần maxmemory không? (5) Kiểm tra network latency. (6) `INFO stats` → `evicted_keys` xem eviction xảy ra không.
 
-**Q4**: Tai sao khong dung Redis List cho production message queue?
+**Q4**: Tại sao không dùng Redis List cho production message queue?
 
-> **Answer**: List khong co: (1) Message acknowledgement — consumer fail thi job mat. (2) Retry mechanism. (3) Dead letter queue. (4) Visibility timeout. (5) Multiple consumer groups. Dung Redis Streams (BullMQ) hoac RabbitMQ/Kafka cho reliable messaging.
+> **Answer**: List không có: (1) Message acknowledgement — consumer fail thì job mất. (2) Retry mechanism. (3) Dead letter queue. (4) Visibility timeout. (5) Multiple consumer groups. Dùng Redis Streams (BullMQ) hoặc RabbitMQ/Kafka cho reliable messaging.
 
-**Q5**: Distributed lock SET NX EX — dieu gi xay ra neu process giu lock bi kill sau khi xu ly xong nhung chua DEL?
+**Q5**: Distributed lock SET NX EX — điều gì xảy ra nếu process giữ lock bị kill sau khi xử lý xong nhưng chưa DEL?
 
-> **Answer**: Lock tu expire sau EX giay — safety net. Nhung neu job chay lau hon EX → lock expire giua chung → process khac lay lock → race condition. Giai phap: (1) EX du lon cho job. (2) Lock renewal watchdog. (3) Idempotent operation.
+> **Answer**: Lock tự expire sau EX giây — safety net. Nhưng nếu job chạy lâu hơn EX → lock expire giữa chừng → process khác lấy lock → race condition. Giải pháp: (1) EX đủ lớn cho job. (2) Lock renewal watchdog. (3) Idempotent operation.
 
-**Q6**: Rate limit `/checkin` toi da 3 lan/phut cho moi employee. Implement the nao?
+**Q6**: Rate limit `/checkin` tối đa 3 lần/phút cho mỗi employee. Implement thế nào?
 
-> **Answer**: Fixed window (INCR + EXPIRE): don gian nhung co boundary issue (3 req cuoi phut + 3 req dau phut tiep = 6 trong 2s). Sliding window chinh xac hon voi Sorted Set: ZADD timestamp, ZREMRANGEBYSCORE ngoai window, ZCARD dem. Trade-off: Sorted Set ton memory hon String counter. Voi timekeeping system scale nho (500-2000 employee) → Fixed window du dung, don gian hon.
+> **Answer**: Fixed window (INCR + EXPIRE): đơn giản nhưng có boundary issue (3 req cuối phút + 3 req đầu phút tiếp = 6 trong 2s). Sliding window chính xác hơn với Sorted Set: ZADD timestamp, ZREMRANGEBYSCORE ngoài window, ZCARD đếm. Trade-off: Sorted Set tốn memory hơn String counter. Với timekeeping system scale nhỏ (500-2000 employee) → Fixed window đủ dùng, đơn giản hơn.
 
-**Q7**: Tai sao nen dung TTL jitter?
+**Q7**: Tại sao nên dùng TTL jitter?
 
-> **Answer**: Neu 2000 employee cung check-in luc 8h, cache duoc set voi EX 600 deu expire luc 8h10. Luc do tat ca request hit DB cung luc → spike. Voi jitter `EX 600 + random(0, 60)` → expire trai ra tu 8h10 den 8h11 → load phan deu.
+> **Answer**: Nếu 2000 employee cùng check-in lúc 8h, cache được set với EX 600 đều expire lúc 8h10. Lúc đó tất cả request hit DB cùng lúc → spike. Với jitter `EX 600 + random(0, 60)` → expire trải ra từ 8h10 đến 8h11 → load phân đều.
 
 ---
 
 ## 9. Appendix: Quick Reference
 
-### Commands Tong Hop
+### Commands Tổng Hợp
 
 ```bash
 # String
@@ -889,26 +889,26 @@ CONFIG GET maxmemory
 CONFIG SET maxmemory 512mb
 ```
 
-### Encoding Noi Bo
+### Encoding Nội Bộ
 
-Redis tu chon encoding toi uu — biet de tranh memory spike:
+Redis tự chọn encoding tối ưu — biết để tránh memory spike:
 
-| Type | Encoding nho | Encoding lon | Nguong chuyen doi |
+| Type | Encoding nhỏ | Encoding lớn | Ngưỡng chuyển đổi |
 |---|---|---|---|
 | String | embstr | raw | > 44 bytes |
-| Hash | listpack | hashtable | > 128 fields hoac value > 64 bytes |
-| List | listpack | quicklist | > 128 elements hoac value > 64 bytes |
-| Set | listpack / intset | hashtable | > 128 members hoac non-integer |
-| Sorted Set | listpack | skiplist | > 128 members hoac value > 64 bytes |
+| Hash | listpack | hashtable | > 128 fields hoặc value > 64 bytes |
+| List | listpack | quicklist | > 128 elements hoặc value > 64 bytes |
+| Set | listpack / intset | hashtable | > 128 members hoặc non-integer |
+| Sorted Set | listpack | skiplist | > 128 members hoặc value > 64 bytes |
 
 ```bash
-# Xem encoding hien tai
+# Xem encoding hiện tại
 OBJECT ENCODING cache:employee:100
 OBJECT ENCODING leaderboard:early-checkin:2026-07-08
 ```
 
-**Tai sao can biet?** Khi Hash vuot 128 fields → chuyen hashtable → memory tang dot bien. Biet de thiet ke key split hop ly.
+**Tại sao cần biết?** Khi Hash vượt 128 fields → chuyển hashtable → memory tăng đột biến. Biết để thiết kế key split hợp lý.
 
 ---
 
-*Day 1 hoan thanh. Next: Day 2 — Persistence (RDB/AOF), Replication & High Availability.*
+*Day 1 hoàn thành. Next: Day 2 — Persistence (RDB/AOF), Replication & High Availability.*

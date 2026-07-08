@@ -1,14 +1,14 @@
 # Redis Production Roadmap
 
-> **Muc tieu tong the**: Hieu Redis dung cach trong backend production — khong chi "biet dung", ma biet **tai sao**, **khi nao**, va **danh doi gi**.
+> **Mục tiêu tổng thể**: Hiểu Redis đúng cách trong backend production — không chỉ "biết dùng", mà biết **tại sao**, **khi nào**, và **đánh đổi gì**.
 
 **Project Context**: Timekeeping System — NestJS + PostgreSQL + Redis. Scale: 500–2000 employees, peak load 8:00–8:30 AM.
 
 ---
 
-## Lo Trinh Hoc
+## Lộ Trình Học
 
-| Day | Chu De | File |
+| Day | Chủ Đề | File |
 |---|---|---|
 | Day 1 | Redis Foundation & Basic Data Types | [Day1_Redis_Foundation_Production_Guide.md](Day_1/Day1_Redis_Foundation_Production_Guide.md) |
 | Day 2 | Redis Core Features | [Day2_Redis_Core_Features_Production_Guide.md](Day_2/Day2_Redis_Core_Features_Production_Guide.md) |
@@ -19,122 +19,122 @@
 
 ## Day 1 — Redis Foundation & Basic Data Types
 
-**Muc tieu**: Hieu Redis la gi, cach tu duy ve key design, TTL, va 5 data type co ban.
+**Mục tiêu**: Hiểu Redis là gì, cách tư duy về key design, TTL, và 5 data type cơ bản.
 
-### Cac khai niem chinh
+### Các khái niệm chính
 
-- **Redis la gi**: In-memory data structure store — bo sung PostgreSQL, khong thay the
-- **In-memory tradeoffs**: Sub-ms latency, gioi han RAM, mat data khi restart neu khong config persistence
-- **Single-threaded**: INCR/ZADD la atomic; `KEYS *` block het client — **cam dung trong production**
+- **Redis là gì**: In-memory data structure store — bổ sung PostgreSQL, không thay thế
+- **In-memory tradeoffs**: Sub-ms latency, giới hạn RAM, mất data khi restart nếu không config persistence
+- **Single-threaded**: INCR/ZADD là atomic; `KEYS *` block hết client — **cấm dùng trong production**
 - **Key naming**: `{namespace}:{entity}:{id}` — vd: `cache:employee:100`, `lock:checkin:100:2026-07-08`
-- **TTL**: `TTL key` tra ve `> 0` (con X giay), `-1` (khong expire), `-2` (key khong ton tai)
+- **TTL**: `TTL key` trả về `> 0` (còn X giây), `-1` (không expire), `-2` (key không tồn tại)
 
 ### 5 Data Types
 
-| Type | Dung Cho | Command Chinh |
+| Type | Dùng Cho | Command Chính |
 |---|---|---|
 | **String** | Cache JSON, counter, OTP, flag | `SET EX`, `GET`, `INCR`, `MGET` |
-| **Hash** | Object nhieu field, update tung field | `HSET`, `HGET`, `HGETALL`, `HINCRBY` |
+| **Hash** | Object nhiều field, update từng field | `HSET`, `HGET`, `HGETALL`, `HINCRBY` |
 | **List** | Queue FIFO, recent activity | `RPUSH`, `LPOP`, `BRPOP`, `LTRIM` |
 | **Set** | Unique collection, membership check | `SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS` |
 | **Sorted Set** | Leaderboard, delayed job, sliding rate limit | `ZADD`, `ZRANGE`, `ZRANK`, `ZRANGEBYSCORE` |
 
 ### Patterns & Pitfalls
 
-- **DEL vs UNLINK**: Dung `UNLINK` cho big key (async delete)
-- **KEYS vs SCAN**: `KEYS *` cam, luon dung `SCAN` voi `COUNT`
+- **DEL vs UNLINK**: Dùng `UNLINK` cho big key (async delete)
+- **KEYS vs SCAN**: `KEYS *` cấm, luôn dùng `SCAN` với `COUNT`
 - **Cache Stampede**: TTL jitter = `base + random(0, 60)`
-- **No TTL on cache**: Memory leak, cache stale mai mai
+- **No TTL on cache**: Memory leak, cache stale mãi mãi
 
 ---
 
 ## Day 2 — Redis Core Features
 
-**Muc tieu**: Nam duoc cac tinh nang ngoai data type co ban — Bitmap, HLL, Pub/Sub, Streams, Transaction, Lua, Pipeline.
+**Mục tiêu**: Nắm được các tính năng ngoài data type cơ bản — Bitmap, HLL, Pub/Sub, Streams, Transaction, Lua, Pipeline.
 
-### Tong Quan
+### Tổng Quan
 
-| Feature | Dung Cho | Khong Dung Cho |
+| Feature | Dùng Cho | Không Dùng Cho |
 |---|---|---|
-| **Bitmap** | Boolean flag theo integer offset (attendance, DAU) | ID lon/sparse — ton memory |
-| **HyperLogLog** | Dem unique xap xi (< 0.81% sai so), tiet kiem memory | Khi can exact count hoac lay danh sach member |
-| **Pub/Sub** | Realtime notification nhe, mat duoc | Reliable messaging — dung Streams |
-| **Streams** | Event log co ack, consumer group, retry | Simple use case — overhead lon hon List/Pub/Sub |
-| **MULTI/EXEC** | Nhom command atomic khong logic | Rollback khi loi logic — khong co rollback nhu SQL |
-| **WATCH** | Optimistic locking — detect key thay doi truoc EXEC | Throughput cao — WATCH abort rate cao |
-| **Lua** | Atomic logic phuc tap (rate limiter, lock release) | Script dai — block event loop |
-| **Pipeline** | Giam network RTT cho bulk ops | Thay the atomic — pipeline KHONG atomic |
+| **Bitmap** | Boolean flag theo integer offset (attendance, DAU) | ID lớn/sparse — tốn memory |
+| **HyperLogLog** | Đếm unique xấp xỉ (< 0.81% sai số), tiết kiệm memory | Khi cần exact count hoặc lấy danh sách member |
+| **Pub/Sub** | Realtime notification nhẹ, mất được | Reliable messaging — dùng Streams |
+| **Streams** | Event log có ack, consumer group, retry | Simple use case — overhead lớn hơn List/Pub/Sub |
+| **MULTI/EXEC** | Nhóm command atomic không logic | Rollback khi lỗi logic — không có rollback như SQL |
+| **WATCH** | Optimistic locking — detect key thay đổi trước EXEC | Throughput cao — WATCH abort rate cao |
+| **Lua** | Atomic logic phức tạp (rate limiter, lock release) | Script dài — block event loop |
+| **Pipeline** | Giảm network RTT cho bulk ops | Thay thế atomic — pipeline KHÔNG atomic |
 
-### Quy Tac Chon
+### Quy Tắc Chọn
 
 ```
-Chi can giam network RTT              → Pipeline
-Can nhom atomic, khong co dieu kien  → MULTI/EXEC
-Can atomic + if/else logic            → Lua
-Realtime notification, mat duoc       → Pub/Sub
+Chỉ cần giảm network RTT              → Pipeline
+Cần nhóm atomic, không có điều kiện  → MULTI/EXEC
+Cần atomic + if/else logic            → Lua
+Realtime notification, mất được       → Pub/Sub
 Reliable event processing             → Streams
-Dem unique cho million+ items         → HyperLogLog
+Đếm unique cho million+ items         → HyperLogLog
 Boolean flag cho integer ID           → Bitmap
 ```
 
-### Persistence Intro (hoc sau Day 4)
+### Persistence Intro (học sau Day 4)
 
-- **RDB**: Snapshot dinh ky, restart nhanh, mat nhieu data
-- **AOF**: Log moi command, mat it data, restart cham hon
-- **No persistence**: Pure cache, data lay lai tu DB
+- **RDB**: Snapshot định kỳ, restart nhanh, mất nhiều data
+- **AOF**: Log mọi command, mất ít data, restart chậm hơn
+- **No persistence**: Pure cache, data lấy lại từ DB
 
 ---
 
 ## Day 3 — Redis Patterns
 
-**Muc tieu**: Implement cac backend pattern thuc te voi Redis dung trong production.
+**Mục tiêu**: Implement các backend pattern thực tế với Redis dùng trong production.
 
 ### Cache Patterns
 
-| Pattern | Mo Ta | Khi Dung |
+| Pattern | Mô Tả | Khi Dùng |
 |---|---|---|
-| **Cache-Aside** | Read cache → miss → read DB → set cache | Default cho moi cache read |
-| **Write Invalidation** | Update DB → DEL cache (khong SET) | Tranh poison cache do race condition |
-| **TTL Jitter** | TTL = base + random(0, max) | Tranh cache expire dong loat |
-| **Stale-While-Revalidate** | Tra stale ngay, refresh background | Latency-sensitive endpoint |
-| **Null Caching** | Cache ket qua null voi TTL ngan | Chong cache penetration |
-| **Mutex per Key** | Lock truoc khi rebuild cache | Chong cache stampede |
-| **Singleflight** | N concurrent miss → chi 1 DB query | Chong stampede, don gian hon mutex |
+| **Cache-Aside** | Read cache → miss → read DB → set cache | Default cho mỗi cache read |
+| **Write Invalidation** | Update DB → DEL cache (không SET) | Tránh poison cache do race condition |
+| **TTL Jitter** | TTL = base + random(0, max) | Tránh cache expire đồng loạt |
+| **Stale-While-Revalidate** | Trả stale ngay, refresh background | Latency-sensitive endpoint |
+| **Null Caching** | Cache kết quả null với TTL ngắn | Chống cache penetration |
+| **Mutex per Key** | Lock trước khi rebuild cache | Chống cache stampede |
+| **Singleflight** | N concurrent miss → chỉ 1 DB query | Chống stampede, đơn giản hơn mutex |
 
 ### 4 Cache Failure Modes
 
-| Mode | Mo Ta | Giai Phap |
+| Mode | Mô Tả | Giải Pháp |
 |---|---|---|
-| **Stampede** | Popular key expire → hang tram request hit DB cung luc | TTL jitter, Mutex per key, Singleflight |
-| **Penetration** | Query ID khong ton tai → bypass cache, hit DB | Null caching, Input validation, Bloom Filter |
-| **Avalanche** | Nhieu key expire dong loat → DB qua tai | TTL jitter, Staggered cache warming |
-| **Hot Key** | 1 key bi request qua nhieu → Redis bottleneck | L1 local cache, Key sharding |
+| **Stampede** | Popular key expire → hàng trăm request hit DB cùng lúc | TTL jitter, Mutex per key, Singleflight |
+| **Penetration** | Query ID không tồn tại → bypass cache, hit DB | Null caching, Input validation, Bloom Filter |
+| **Avalanche** | Nhiều key expire cùng lúc → DB quá tải | TTL jitter, Staggered cache warming |
+| **Hot Key** | 1 key bị request quá nhiều → Redis bottleneck | L1 local cache, Key sharding |
 
 ### Distributed Lock
 
 ```
 Acquire: SET lock:{resource} {uuid} NX PX {ttl_ms}
 Release: Lua script — check uuid → DEL (atomic)
-Watchdog: Renew TTL moi TTL/3 neu job dai
+Watchdog: Renew TTL mỗi TTL/3 nếu job dài
 ```
 
-**Rule**: Redis lock la tang phong thu. **DB UNIQUE constraint la chot cuoi.**
+**Rule**: Redis lock là tầng phòng thủ. **DB UNIQUE constraint là chốt cuối.**
 
 ### Idempotency Key
 
 ```
 Header: X-Idempotency-Key: {uuid}
 Redis: SET idempotency:{path}:{key} "processing" NX EX 86400
-→ OK  : Request moi, xu ly tiep
-→ nil : Duplicate, tra ket qua cu hoac 202
+→ OK  : Request mới, xử lý tiếp
+→ nil : Duplicate, trả kết quả cũ hoặc 202
 ```
 
 ### Rate Limiting
 
-| Kieu | Cach Lam | Uu Diem | Nhuoc Diem |
+| Kiểu | Cách Làm | Ưu Điểm | Nhược Điểm |
 |---|---|---|---|
-| **Fixed Window** | INCR + EXPIRE (Lua atomic) | Don gian, it memory | Boundary issue (burst 2x limit) |
-| **Sliding Window** | ZADD timestamp, ZREMRANGEBYSCORE, ZCARD | Chinh xac | Ton memory hon (O(1) per request) |
+| **Fixed Window** | INCR + EXPIRE (Lua atomic) | Đơn giản, ít memory | Boundary issue (burst 2x limit) |
+| **Sliding Window** | ZADD timestamp, ZREMRANGEBYSCORE, ZCARD | Chính xác | Tốn memory hơn (O(1) per request) |
 
 ### Queue / Retry / DLQ (Streams)
 
@@ -147,12 +147,12 @@ Pending > 30s → XAUTOCLAIM → Retry
 Retry > 3x   → XADD DLQ + XACK + Alert
 ```
 
-### Full Check-in Flow (Bai Tap Lon)
+### Full Check-in Flow (Bài Tập Lớn)
 
 ```
 POST /checkin
-  [1] Rate Limit:      rate:checkin:{id} → INCR (Lua) → 429 neu vuot
-  [2] Idempotency:     idempotency:checkin:{key} SET NX → skip neu duplicate
+  [1] Rate Limit:      rate:checkin:{id} → INCR (Lua) → 429 nếu vượt
+  [2] Idempotency:     idempotency:checkin:{key} SET NX → skip nếu duplicate
   [3] Acquire Lock:    lock:checkin:{id}:{date} SET NX PX 10000
   [4] Write DB:        INSERT ... ON CONFLICT DO NOTHING
   [5] Invalidate:      UNLINK cache:attendance-summary:{id}:{date}
@@ -168,60 +168,60 @@ POST /checkin
 
 ## Day 4 — Production Redis
 
-**Muc tieu**: Cau hinh, van hanh, monitor, bao mat Redis trong production.
+**Mục tiêu**: Cấu hình, vận hành, monitor, bảo mật Redis trong production.
 
 ### Persistence Decision
 
-| Use Case | Persistence | Ly Do |
+| Use Case | Persistence | Lý Do |
 |---|---|---|
-| Cache (employee, shift, summary) | **None** | Rebuild duoc tu DB |
-| Session, OTP, Idempotency, Stream | **AOF everysec** | Mat = UX xau hoac duplicate write |
-| Rate limit, lock, counter | **None** | Mat OK, reset tu dong |
+| Cache (employee, shift, summary) | **None** | Rebuild được từ DB |
+| Session, OTP, Idempotency, Stream | **AOF everysec** | Mất = UX xấu hoặc duplicate write |
+| Rate limit, lock, counter | **None** | Mất OK, reset tự động |
 
-**Recommendation**: Dung `aof-use-rdb-preamble yes` (hybrid mode) — restart nhanh + it mat data.
+**Recommendation**: Dùng `aof-use-rdb-preamble yes` (hybrid mode) — restart nhanh + ít mất data.
 
 ### Memory & Eviction
 
 ```conf
 maxmemory 2gb
-maxmemory-policy volatile-lru   # Cache key (co TTL) bi evict truoc
-                                 # Session/lock (TTL dai) duoc bao ve hon
+maxmemory-policy volatile-lru   # Cache key (có TTL) bị evict trước
+                                 # Session/lock (TTL dài) được bảo vệ hơn
 ```
 
 **Alert**: `used_memory > 70% maxmemory`. **Critical**: `> 85%`.
 
 ### High Availability
 
-| Option | Khi Dung | Kha Nang |
+| Option | Khi Dùng | Khả Năng |
 |---|---|---|
-| **Standalone** | Dev, staging | Khong HA |
-| **Sentinel** | Production < 10GB, 1 shard | HA, auto failover, khong scale-out |
-| **Cluster** | > 10GB, write > 100k ops/s | HA + sharding, gioi han multi-key |
-| **Managed** (ElastiCache, Upstash) | Muon tranh ops burden | HA + monitoring san co |
+| **Standalone** | Dev, staging | Không HA |
+| **Sentinel** | Production < 10GB, 1 shard | HA, auto failover, không scale-out |
+| **Cluster** | > 10GB, write > 100k ops/s | HA + sharding, giới hạn multi-key |
+| **Managed** (ElastiCache, Upstash) | Muốn tránh ops burden | HA + monitoring sẵn có |
 
 **Timekeeping**: Sentinel (3 Sentinel + 1 Primary + 2 Replica).
 
 ### Hash Tag trong Cluster
 
 ```
-user:{100}:profile   → hash slot cua "100"
-user:{100}:session   → hash slot cua "100" (cung slot → MGET duoc)
+user:{100}:profile   → hash slot của "100"
+user:{100}:session   → hash slot của "100" (cùng slot → MGET được)
 ```
 
-### Key Metrics Can Monitor
+### Key Metrics Cần Monitor
 
 | Metric | Target | Alert |
 |---|---|---|
 | `used_memory / maxmemory` | < 70% | > 85% |
 | `mem_fragmentation_ratio` | 1.0–1.5 | > 2.0 |
-| `evicted_keys` | 0 | > 0 lien tuc |
+| `evicted_keys` | 0 | > 0 liên tục |
 | **Hit ratio** | > 85% | < 80% |
 | `replication lag` | 0s | > 5s |
 | `rejected_connections` | 0 | > 0 |
-| `slowlog entries` | 0 / phut | > 10 / phut |
+| `slowlog entries` | 0 / phút | > 10 / phút |
 
 ```bash
-# Tinh hit ratio
+# Tính hit ratio
 INFO stats | grep keyspace
 # hit_ratio = keyspace_hits / (keyspace_hits + keyspace_misses)
 ```
@@ -229,23 +229,23 @@ INFO stats | grep keyspace
 ### Security Baseline
 
 ```bash
-bind <private-ip>                     # Khong expose public
+bind <private-ip>                     # Không expose public
 protected-mode yes
 ACL SETUSER app on >pass ~cache:* +get +set +del +expire
 ACL SETUSER default off               # Disable default user
-rename-command FLUSHALL ""            # Disable nguy hiem
+rename-command FLUSHALL ""            # Disable nguy hiểm
 rename-command FLUSHDB ""
 ```
 
 ### Top 7 Operational Pitfalls
 
-1. **Fork lag**: `BGSAVE` tren instance lon → block vai giay — dung gio thap tai
-2. **maxmemory = 0**: Redis dung het RAM → OS swap → latency vot
-3. **Khong set TTL**: Cache key ton tai mai → memory leak → eviction chaos
-4. **KEYS * trong production**: Block 200–500ms tren 1M key — dung `SCAN`
-5. **Khong monitor SLOWLOG**: Bug `KEYS *` lay vao production, khong phat hien
-6. **Connection pool anti-pattern**: Tao Redis instance moi moi request → 10k connections
-7. **Chi dua vao Redis lock**: Khong co DB constraint → duplicate data khi Redis fail
+1. **Fork lag**: `BGSAVE` trên instance lớn → block vài giây — dùng giờ thấp tải
+2. **maxmemory = 0**: Redis dùng hết RAM → OS swap → latency vọt
+3. **Không set TTL**: Cache key tồn tại mãi → memory leak → eviction chaos
+4. **KEYS * trong production**: Block 200–500ms trên 1M key — dùng `SCAN`
+5. **Không monitor SLOWLOG**: Bug `KEYS *` lọt vào production, không phát hiện
+6. **Connection pool anti-pattern**: Tạo Redis instance mới mỗi request → 10k connections
+7. **Chỉ dựa vào Redis lock**: Không có DB constraint → duplicate data khi Redis fail
 
 ---
 
@@ -282,12 +282,12 @@ EVAL "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]
 
 ---
 
-## Nguyen Tac Nho Doi
+## Nguyên Tắc Nhớ Đời
 
-> Redis **bo sung** PostgreSQL, khong **thay the**.
-> Lock Redis la **tranh**. DB constraint la **chot**.
-> Cache hit ratio < 80% → review lai strategy.
+> Redis **bổ sung** PostgreSQL, không **thay thế**.
+> Lock Redis là **tranh**. DB constraint là **chốt**.
+> Cache hit ratio < 80% → review lại strategy.
 > `KEYS *` trong production → incident.
-> Khong co TTL tren cache key → memory leak.
-> Pub/Sub mat message → Streams co ack.
-> Redis failure phai **graceful degradation**, khong crash app.
+> Không có TTL trên cache key → memory leak.
+> Pub/Sub mất message → Streams có ack.
+> Redis failure phải **graceful degradation**, không crash app.
